@@ -1,0 +1,7 @@
+{
+  "name": "MiAppMovil",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
