@@ -1,37 +1,217 @@
 /*
- * App Global CSS
+ * App Global CSS — Industrial Command Center Theme
  * ----------------------------------------------------------------------------
- * Put style rules here that you want to apply globally. These styles are for
- * the entire app and not just one component. Additionally, this file can be
- * used as an entry point to import other CSS/Sass files to be included in the
- * output CSS.
- * For more information on global stylesheets, visit the documentation:
- * https://ionicframework.com/docs/layout/global-stylesheets
+ * Design System: Dark Slate / Comando Industrial
+ * Background:   #0F172A  |  Cards: #1E293B  |  Text: #F8FAFC / #94A3B8
+ * Status:  CRÍTICO #EF4444  |  ALERTA #F59E0B  |  ESTABLE #10B981
+ * Radius:  8px (squared authority)
  */
 
 /* Core CSS required for Ionic components to work properly */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 @import "@ionic/angular/css/core.css";
-
-/* Basic CSS for apps built with Ionic */
 @import "@ionic/angular/css/normalize.css";
 @import "@ionic/angular/css/structure.css";
 @import "@ionic/angular/css/typography.css";
 @import "@ionic/angular/css/display.css";
-
-/* Optional CSS utils that can be commented out */
 @import "@ionic/angular/css/padding.css";
 @import "@ionic/angular/css/float-elements.css";
 @import "@ionic/angular/css/text-alignment.css";
 @import "@ionic/angular/css/text-transformation.css";
 @import "@ionic/angular/css/flex-utils.css";
 
-/**
- * Ionic Dark Mode
- * -----------------------------------------------------
- * For more info, please see:
- * https://ionicframework.com/docs/theming/dark-mode
- */
+@import '@ionic/angular/css/palettes/dark.class.css';
 
-/* @import "@ionic/angular/css/palettes/dark.always.css"; */
-/* @import "@ionic/angular/css/palettes/dark.class.css"; */
-@import '@ionic/angular/css/palettes/dark.system.css';
+/* ─────────────────────────────────────────────────────────────
+   DESIGN TOKENS — UAI Brand Manual (aplicados globalmente)
+───────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --ion-font-family: 'DM Sans', sans-serif !important;
+
+  --cc-bg:          #022022;   /* fondo principal de la app */
+  --cc-surface:     #014751;   /* tarjetas y contenedores */
+  --cc-surface-mid: #025763;   /* elementos elevados */
+  --cc-surface-hi:  #026674;   /* tooltips, dropdowns */
+
+  /* Text */
+  --cc-text-primary:   #FDFEF0;
+  --cc-text-secondary: #91A2B8;
+  --cc-text-muted:     #6A7B92;
+
+  /* Borders */
+  --cc-border:         rgba(253, 254, 240, 0.08);
+  --cc-border-strong:  rgba(253, 254, 240, 0.14);
+
+  /* Status */
+  --cc-crit:      #EF4444;
+  --cc-crit-bg:   rgba(239, 68, 68, 0.10);
+  --cc-crit-border: rgba(239, 68, 68, 0.30);
+
+  --cc-warn:      #F59E0B;
+  --cc-warn-bg:   rgba(245, 158, 11, 0.10);
+  --cc-warn-border: rgba(245, 158, 11, 0.30);
+
+  --cc-ok:        #10B981;
+  --cc-ok-bg:     rgba(16, 185, 129, 0.08);
+  --cc-ok-border: rgba(16, 185, 129, 0.25);
+
+  /* Accent (UAI brand) */
+  --cc-accent:    #29E490;
+
+  /* Radius — cuadrado con autoridad */
+  --cc-radius-sm:  4px;
+  --cc-radius:     8px;
+  --cc-radius-lg:  12px;
+  --cc-radius-xl:  16px;
+
+  /* Utility mappings (backward-compat con clases existentes) */
+  --background-gradient:   #022022;
+  --surface-low:           #014751;
+  --surface-high:          #025763;
+  --surface-highest:       #026674;
+  --on-surface:            #FDFEF0;
+  --on-background:         #FDFEF0;
+  --text-muted:            #91A2B8;
+  --surface-border:        rgba(253, 254, 240, 0.08);
+  --accent-red:            #EF4444;
+  --accent-yellow:         #F59E0B;
+  --accent-green:          #10B981;
+  --primary:               #29E490;
+  --primary-container:     #10B981;
+  --on-primary:            #022022;
+  --error:                 #EF4444;
+  --tertiary:              #F59E0B;
+  --button-background:     linear-gradient(135deg, #34d399 0%, #29E490 100%);
+  --button-text:           #022022;
+}
+
+/* Forzar fondo base de Ionic */
+ion-content {
+  --background: #022022;
+}
+
+ion-app, .ion-page {
+  background: #022022;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   UTILITY CLASSES — mapeo a tokens Command Center
+───────────────────────────────────────────────────────────── */
+.bg-background {
+  background: var(--cc-bg) !important;
+}
+
+.bg-surface-container-low {
+  background-color: var(--cc-surface) !important;
+}
+
+.bg-surface-container-high {
+  background-color: var(--cc-surface-mid) !important;
+}
+
+.bg-surface-container-highest {
+  background-color: var(--cc-surface-hi) !important;
+}
+
+.text-on-background  { color: var(--cc-text-primary) !important; }
+.text-on-surface     { color: var(--cc-text-primary) !important; }
+.text-on-surface-variant { color: var(--cc-text-secondary) !important; }
+.text-primary        { color: var(--cc-accent) !important; }
+.text-error          { color: var(--cc-crit) !important; }
+.text-secondary      { color: var(--cc-text-secondary) !important; }
+
+.border-surface      { border-color: var(--cc-border) !important; }
+.border-surface-border { border-color: var(--cc-border) !important; }
+
+/* ─────────────────────────────────────────────────────────────
+   GLOBAL RADIUS OVERRIDE — 8px cuadrado
+───────────────────────────────────────────────────────────── */
+
+/* Clases Tailwind redondeadas → comandar a 8px */
+.rounded-lg,
+.rounded-xl,
+.rounded-2xl,
+.rounded-3xl,
+[class*="rounded-["] {
+  border-radius: var(--cc-radius) !important;
+}
+
+.rounded-full {
+  /* pills y badges conservan su pill shape */
+  border-radius: 9999px !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CARD BASE — estilo Command Center
+───────────────────────────────────────────────────────────── */
+.card-border-top {
+  border-top-color: var(--cc-border-strong);
+}
+
+.card-gradient-green {
+  background: var(--cc-surface);
+}
+
+.card-gradient-default {
+  background: var(--cc-surface);
+}
+
+.card-accent-red,
+.card-accent-green {
+  box-shadow: none;
+  border-color: var(--cc-border) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   FILTER / BUTTON STATES
+───────────────────────────────────────────────────────────── */
+.filter-btn-inactive {
+  background: rgba(248, 250, 252, 0.04);
+  border-color: var(--cc-border);
+  color: var(--cc-text-secondary);
+}
+.filter-btn-inactive:hover {
+  background: rgba(248, 250, 252, 0.08);
+  border-color: var(--cc-border-strong);
+  color: var(--cc-text-primary);
+}
+
+.btn-uai-ingresar,
+.btn-uai-ingresar::part(native) {
+  --background: var(--button-background) !important;
+  --color:      var(--button-text) !important;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   TYPOGRAPHY BASE
+───────────────────────────────────────────────────────────── */
+body, button, input, select, textarea, .ion-page, ion-content {
+  font-family: 'DM Sans', sans-serif !important;
+}
+
+/* Tab navigation filled icons support */
+.filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24 !important;
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined' !important;
+}
+
+body {
+  background: var(--cc-bg);
+  color: var(--cc-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ANIMATE FADE-IN utility
+───────────────────────────────────────────────────────────── */
+.animate-fade-in {
+  animation: globalFadeIn 0.22s ease both;
+}
+@keyframes globalFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

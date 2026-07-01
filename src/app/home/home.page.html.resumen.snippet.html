@@ -1,0 +1,151 @@
+    <ng-container *ngIf="activeTab === 'resumen'">
+      <div class="space-y-3 animate-fade-in pb-10">
+
+        <!-- HERO CARD: Gasto Total -->
+        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/10" style="background: linear-gradient(135deg, #014751 0%, #013440 60%, #022022 100%)">
+          <div class="absolute -top-6 -right-6 w-40 h-40 rounded-full" style="background: radial-gradient(circle, rgba(41,228,144,0.12) 0%, transparent 70%)"></div>
+          <div class="absolute bottom-0 left-0 w-24 h-24 rounded-full" style="background: radial-gradient(circle, rgba(41,228,144,0.06) 0%, transparent 70%)"></div>
+
+          <div class="relative z-10 px-5 pt-4 flex justify-between items-center">
+            <div class="flex items-center gap-1.5 bg-black/20 rounded-full px-3 py-1 border border-white/5">
+              <span class="material-symbols-outlined text-[13px] text-[#29E490]">calendar_month</span>
+              <button (click)="togglePeriodDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1">
+                {{ getSelectedPeriodLabel() }}
+                <span class="material-symbols-outlined text-[12px] text-white/40 transition-transform duration-300" [class.rotate-180]="showPeriodDropdown">expand_more</span>
+              </button>
+            </div>
+            <div class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border"
+                 [ngClass]="(facturasData.gastoCambio || 0) > 0 ? 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/20' : 'bg-[#29E490]/10 text-[#29E490] border-[#29E490]/20'">
+              <span class="material-symbols-outlined text-[12px]">{{ (facturasData.gastoCambio || 0) > 0 ? 'trending_up' : 'trending_down' }}</span>
+              {{ (facturasData.gastoCambio || 0) > 0 ? '+' : '' }}{{ facturasData.gastoCambio || 0 }}%
+            </div>
+          </div>
+
+          <div *ngIf="showPeriodDropdown" class="absolute top-14 left-5 z-30 w-48 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
+            <button *ngFor="let p of periodos" (click)="selectPeriodo(p.value)"
+                    class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                    [class.text-[#29E490]]="selectedPeriod === p.value">
+              <span class="material-symbols-outlined text-base">{{ p.icon }}</span> {{ p.label }}
+            </button>
+          </div>
+
+          <div class="relative z-10 px-5 pt-3 pb-5">
+            <p class="text-[#91A2B8] text-[10px] uppercase tracking-[0.2em] font-bold mb-1">Gasto Total Acumulado</p>
+            <div class="flex items-end gap-3">
+              <span class="text-5xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ facturasData.gastoTotal || '$0M' }}</span>
+            </div>
+            <div class="mt-4 h-px" style="background: linear-gradient(90deg, rgba(41,228,144,0.5) 0%, transparent 100%)"></div>
+          </div>
+        </div>
+
+        <!-- STRIP METRICAS 3 columnas -->
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-[16px] p-3 flex flex-col gap-1 border border-white/5 relative overflow-hidden" style="background:#014751">
+            <div class="absolute top-0 left-0 w-1 h-full rounded-l-[16px] bg-[#29E490]"></div>
+            <span class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-bold pl-2">Consumo</span>
+            <span class="pl-2 text-base font-black text-[#29E490] tracking-tighter leading-none">{{ (facturasData.consumoMWh * 1000) || 0 | number:'1.0-0' }}</span>
+            <span class="pl-2 text-[9px] text-[#91A2B8] font-semibold">kWh</span>
+          </div>
+          <div class="rounded-[16px] p-3 flex flex-col gap-1 border border-white/5 relative overflow-hidden" style="background:#014751">
+            <div class="absolute top-0 left-0 w-1 h-full rounded-l-[16px] bg-[#91A2B8]/50"></div>
+            <span class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-bold pl-2">Tarifa</span>
+            <span class="pl-2 text-base font-black text-[#FDFEF0] tracking-tighter leading-none">{{ facturasData.tarifaPromedio || '$0' }}</span>
+            <span class="pl-2 text-[9px] text-[#91A2B8] font-semibold">/kWh</span>
+          </div>
+          <div class="rounded-[16px] p-3 flex flex-col gap-1 border border-white/5 relative overflow-hidden" style="background:#014751">
+            <div class="absolute top-0 left-0 w-1 h-full rounded-l-[16px]" [ngClass]="co2CambioMock > 0 ? 'bg-[#EF4444]' : 'bg-[#29E490]'"></div>
+            <span class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-bold pl-2">CO2</span>
+            <span class="pl-2 text-base font-black text-[#FDFEF0] tracking-tighter leading-none">{{ calculatedCO2 }}</span>
+            <span class="pl-2 text-[9px] font-bold" [ngClass]="co2CambioMock > 0 ? 'text-[#EF4444]' : 'text-[#29E490]'">{{ co2CambioMock > 0 ? '+' : '' }}{{ co2CambioMock }}%</span>
+          </div>
+        </div>
+
+        <!-- REACTIVA PENALIZADA -->
+        <div class="rounded-[16px] px-4 py-3 flex items-center justify-between border relative overflow-hidden"
+             [ngClass]="facturasData.reactivaKvarh > 0 ? 'border-[#EF4444]/30 bg-[#EF4444]/5' : 'border-white/5 bg-[#014751]'">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                 [ngClass]="facturasData.reactivaKvarh > 0 ? 'bg-[#EF4444]/15' : 'bg-[#29E490]/10'">
+              <span class="material-symbols-outlined text-[16px]"
+                    [ngClass]="facturasData.reactivaKvarh > 0 ? 'text-[#EF4444]' : 'text-[#29E490]'">electric_meter</span>
+            </div>
+            <div>
+              <p class="text-[10px] uppercase tracking-widest font-bold"
+                 [ngClass]="facturasData.reactivaKvarh > 0 ? 'text-[#EF4444]' : 'text-[#91A2B8]'">Reactiva Penalizada</p>
+              <p class="text-[9px] text-[#91A2B8] mt-0.5">{{ facturasData.reactivaKvarh > 0 ? 'Requiere atencion' : 'Dentro del limite' }}</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-xl font-black tracking-tighter" [ngClass]="facturasData.reactivaKvarh > 0 ? 'text-[#EF4444]' : 'text-[#FDFEF0]'">
+              {{ facturasData.reactivaKvarh | number:'1.0-0' }}
+            </span>
+            <span class="text-[9px] font-bold ml-1" [ngClass]="facturasData.reactivaKvarh > 0 ? 'text-[#EF4444]/70' : 'text-[#91A2B8]'">kVArh</span>
+          </div>
+        </div>
+
+        <!-- GRAFICO PREMIUM DE TENDENCIA -->
+        <div class="rounded-[24px] border border-white/5 overflow-hidden" style="background:#014751">
+          <div class="px-5 pt-5 pb-3 flex items-start justify-between">
+            <div>
+              <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">Tendencia de Consumo</h3>
+              <p class="text-[#91A2B8] text-[10px] mt-0.5 uppercase tracking-widest">kWh por periodo</p>
+            </div>
+            <span class="text-[10px] font-bold text-[#29E490] bg-[#29E490]/10 px-2 py-1 rounded-full">
+              {{ barChartMockData[barChartMockData.length - 1]?.month || '' }}
+            </span>
+          </div>
+
+          <div class="relative pb-7 px-0 pt-1">
+            <div class="absolute left-3 top-0 bottom-7 flex flex-col justify-between pointer-events-none">
+              <span class="text-[8px] text-[#91A2B8]/50 font-semibold">MAX</span>
+              <span class="text-[8px] text-[#91A2B8]/50 font-semibold">50%</span>
+              <span class="text-[8px] text-[#91A2B8]/50 font-semibold">0</span>
+            </div>
+            <div class="relative h-36 ml-8 mr-2">
+              <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="trendFill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="#29E490" stop-opacity="0.25"/>
+                    <stop offset="85%" stop-color="#29E490" stop-opacity="0"/>
+                  </linearGradient>
+                  <filter id="lineGlow">
+                    <feGaussianBlur stdDeviation="1" result="blur"/>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                  </filter>
+                </defs>
+                <line x1="0" y1="0"   x2="100" y2="0"   stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.5"/>
+                <line x1="0" y1="25"  x2="100" y2="25"  stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.5"/>
+                <line x1="0" y1="50"  x2="100" y2="50"  stroke="#FDFEF0" stroke-opacity="0.06" stroke-width="0.5"/>
+                <line x1="0" y1="75"  x2="100" y2="75"  stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.5"/>
+                <line x1="0" y1="100" x2="100" y2="100" stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.5"/>
+                <path [attr.d]="trendSvgArea" fill="url(#trendFill)"/>
+                <path [attr.d]="trendSvgPath" fill="none" stroke="#29E490" stroke-opacity="0.2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path [attr.d]="trendSvgPath" fill="none" stroke="#29E490" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" filter="url(#lineGlow)"/>
+                <circle *ngFor="let item of barChartMockData; let i = index; let last = last"
+                        [attr.cx]="i * (100 / (barChartMockData.length > 1 ? barChartMockData.length - 1 : 1))"
+                        [attr.cy]="100 - item.value"
+                        [attr.r]="last ? 0 : 1.5"
+                        fill="#29E490" fill-opacity="0.6"/>
+                <ng-container *ngIf="barChartMockData.length > 0">
+                  <circle [attr.cx]="100" [attr.cy]="100 - barChartMockData[barChartMockData.length - 1].value"
+                          r="4" fill="#014751" stroke="#29E490" stroke-width="2"/>
+                  <circle [attr.cx]="100" [attr.cy]="100 - barChartMockData[barChartMockData.length - 1].value"
+                          r="1.5" fill="#29E490"/>
+                  <line x1="100" [attr.y1]="100 - barChartMockData[barChartMockData.length - 1].value"
+                        x2="100" y2="100"
+                        stroke="#29E490" stroke-opacity="0.2" stroke-width="0.8" stroke-dasharray="2,2"/>
+                </ng-container>
+              </svg>
+            </div>
+            <div class="flex justify-between px-2 ml-8 mr-2 mt-2">
+              <span *ngFor="let item of barChartMockData; let last = last"
+                    class="text-center flex-1 text-[8px] font-semibold leading-none"
+                    [ngClass]="last ? 'text-[#29E490]' : 'text-[#91A2B8]/60'">
+                {{ item.month }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </ng-container>

@@ -1,0 +1,185 @@
+.uai-login-page {
+  // Degradado exacto extraído de tu código de Stitch
+  --background: linear-gradient(180deg, #1F1F1F 0%, #014751 100%);
+  font-family: 'DM Sans', sans-serif;
+}
+
+.login-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - env(safe-area-inset-top));
+  padding: env(safe-area-inset-top, 2rem) 2rem 4rem 2rem;
+  padding-top: calc(env(safe-area-inset-top) + 2rem);
+  box-sizing: border-box;
+}
+
+.logo-container {
+  margin-bottom: 1.5rem;
+}
+
+.uai-logo-img {
+  display: block;
+  max-width: 160px;
+  width: 100%;
+  margin: 0 auto 1.5rem;
+}
+
+.welcome-container {
+  text-align: center;
+  margin-bottom: 2.5rem;
+  
+  h2 {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #e5e2e1; // on-surface
+    margin: 0 0 0.5rem 0;
+    letter-spacing: -0.025em;
+  }
+
+  p {
+    font-size: 0.85rem;
+    color: rgba(219, 227, 230, 0.8); // #DBE3E6 con opacidad
+    margin: 0 auto;
+    font-weight: 500;
+    max-width: 250px;
+    line-height: 1.5;
+  }
+}
+
+.form-container {
+  width: 100%;
+  max-width: 340px;
+
+  .input-group {
+    margin-bottom: 1.25rem;
+
+    label {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #DBE3E6;
+      margin-left: 1.2rem;
+      margin-bottom: 0.4rem;
+    }
+  }
+}
+
+.custom-input-wrapper {
+  position: relative;
+  width: 100%;
+
+  .uai-input {
+    --background: #ffffff;
+    --color: #001f25;
+    --placeholder-color: rgba(0, 31, 37, 0.4);
+    --padding-start: 1.5rem;
+    --padding-end: 5rem;
+    height: 3.5rem;
+    border-radius: 9999px; // Totalmente redondo como tu prototipo
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
+
+  .input-icon {
+    position: absolute;
+    right: 1.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(0, 31, 37, 0.3);
+    font-size: 1.3rem;
+    z-index: 10;
+  }
+
+  .toggle-password-icon {
+    position: absolute;
+    right: 3.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(0, 31, 37, 0.45);
+    font-size: 1.3rem;
+    z-index: 10;
+    cursor: pointer;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: rgba(0, 31, 37, 0.7);
+    }
+
+    &:active {
+      color: #014751;
+    }
+  }
+}
+
+.forgot-link-container {
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 1rem;
+  margin-top: 0.4rem;
+
+  .btn-forgot {
+    background: transparent;
+    border: none;
+    color: #55ffa8; 
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+}
+
+.action-container {
+  width: 100%;
+  max-width: 340px;
+  margin-top: 2rem;
+
+  .btn-uai-ingresar {
+    --background: linear-gradient(135deg, #76ffb2 0%, #29e590 100%) !important;
+    --color: #002110 !important;
+    --border-radius: 9999px !important;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    height: 3.5rem;
+    margin-top: 1.5rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 33, 16, 0.3);
+  }
+}
+
+.footer-container {
+  margin-top: 2.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(219, 227, 230, 0.6);
+
+  .support-text {
+    color: #76ffb2;
+    font-weight: 700;
+    margin-left: 0.25rem;
+    cursor: pointer;
+  }
+}
+
+/* ── Keyboard open: hide logo, welcome, footer with smooth transition ── */
+.keyboard-hidden {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.15s ease, margin 0.25s ease;
+}
+
+.logo-container,
+.welcome-container,
+.footer-container {
+  transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+  max-height: 300px;
+  opacity: 1;
+}

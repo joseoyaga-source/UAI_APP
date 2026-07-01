@@ -1,0 +1,45 @@
+<ion-content [fullscreen]="true" class="uai-login-page" [scrollY]="true">
+  <div class="login-wrapper">
+    
+    <div class="logo-container" [class.keyboard-hidden]="keyboardOpen">
+      <ion-icon name="flash" class="bolt-icon"></ion-icon>
+    </div>
+
+    <div class="welcome-container" [class.keyboard-hidden]="keyboardOpen">
+      <h2>Inicia sesión</h2>
+      <p>Accede a tus dashboards, alertas y reportes</p>
+    </div>
+
+    <div class="form-container">
+      <div class="input-group">
+        <label>CORREO</label>
+        <div class="custom-input-wrapper">
+          <ion-input type="email" placeholder="usuario@uai.energy" class="uai-input" [(ngModel)]="email"></ion-input>
+          <ion-icon name="mail-outline" class="input-icon"></ion-icon>
+        </div>
+      </div>
+
+      <div class="input-group">
+        <label>CONTRASEÑA</label>
+        <div class="custom-input-wrapper">
+          <ion-input [type]="showPassword ? 'text' : 'password'" placeholder="••••••••" class="uai-input" [(ngModel)]="password"></ion-input>
+          <ion-icon name="lock-closed-outline" class="input-icon"></ion-icon>
+          <ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'" class="toggle-password-icon" (click)="showPassword = !showPassword"></ion-icon>
+        </div>
+      </div>
+
+      <div class="forgot-link-container">
+        <button class="btn-forgot">¿Olvidaste tu contraseña?</button>
+      </div>
+    </div>
+
+    <div class="action-container">
+      <ion-button expand="block" class="btn-uai-ingresar" (click)="onLogin()">INGRESAR</ion-button>
+    </div>
+
+    <div class="footer-container" [class.keyboard-hidden]="keyboardOpen">
+      <p>¿No tienes una cuenta? <span class="support-text">Contactar Soporte</span></p>
+    </div>
+
+  </div>
+</ion-content>
