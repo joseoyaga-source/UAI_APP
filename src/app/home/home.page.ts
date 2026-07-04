@@ -76,6 +76,7 @@ export class HomePage implements OnInit {
   infraItems: ResumenEjecutivoItem[] = [];
   showProfileDropdown = false;
   @ViewChild('profileDropdown') profileDropdown?: ElementRef;
+  @ViewChild(IonContent) ionContent?: IonContent;
 
   // --- App Shell Context Switcher ---
   currentContext: 'Gestión de Facturas' | 'Infraestructura' = 'Gestión de Facturas';
@@ -231,10 +232,10 @@ export class HomePage implements OnInit {
 
   // --- Alarmas por facturas faltantes (por contrato) ---
   facturasRawItems: any[] = [];
-  missingInvoiceAlarms: { contractNumber: string; lastDate: string; expectedMonth: string }[] = [];
+  missingInvoiceAlarms: { contractNumber: string; lastDate: string; expectedMonth: string; customerName?: string; customerId?: string }[] = [];
 
   // --- Alarmas por facturas pendientes de pago (payment_date null + due_date <= 5 días) ---
-  pendingPaymentAlarms: { invoiceNumber: string; contractNumber: string; headquartersName: string; expeditionDate: string; dueDate: string; totalToPay: string; daysLeft: number }[] = [];
+  pendingPaymentAlarms: { invoiceNumber: string; contractNumber: string; headquartersName: string; expeditionDate: string; dueDate: string; totalToPay: string; daysLeft: number; customerName?: string; customerId?: string }[] = [];
 
   // --- Contratos ---
   estadosContratos: any[] = [];
@@ -272,21 +273,27 @@ export class HomePage implements OnInit {
   get notifications(): { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] {
     if (this.currentContext === 'Gestión de Facturas') {
       // Alarmas de facturas faltantes por contrato
-      const missingAlarms = this.missingInvoiceAlarms.map(m => ({
-        title: '⚠️ Factura No Recibida',
-        subtitle: `Contrato: ${m.contractNumber}`,
-        detail: `Factura de ${m.expectedMonth} no ha llegado. Última recibida: ${m.lastDate}`,
-        type: 'alarm'
-      }));
+      const missingAlarms = this.missingInvoiceAlarms.map(m => {
+        const clientPrefix = this.hasMultipleCustomers() ? `[${m.customerName || m.customerId || ''}] ` : '';
+        return {
+          title: `${clientPrefix}⚠️ Factura No Recibida`,
+          subtitle: `Contrato: ${m.contractNumber}`,
+          detail: `Factura de ${m.expectedMonth} no ha llegado. Última recibida: ${m.lastDate}`,
+          type: 'alarm'
+        };
+      });
       // Alarmas de pago: vencidas o por vencer en ≤ 5 días (desde reporte_datos_basicos_facturas)
-      const pendingAlarms = this.pendingPaymentAlarms.map(p => ({
-        title: p.daysLeft < 0
-          ? `🔴 Pago Vencido — Contrato ${p.contractNumber}`
-          : `🟡 Vence en ${p.daysLeft} día${p.daysLeft !== 1 ? 's' : ''} — Contrato ${p.contractNumber}`,
-        subtitle: `${p.headquartersName} • Vencimiento: ${p.dueDate}`,
-        detail: `Factura ${p.invoiceNumber} • Expedida: ${p.expeditionDate} • Total: ${p.totalToPay}`,
-        type: 'alarm'
-      }));
+      const pendingAlarms = this.pendingPaymentAlarms.map(p => {
+        const clientPrefix = this.hasMultipleCustomers() ? `[${p.customerName || p.customerId || ''}] ` : '';
+        return {
+          title: p.daysLeft < 0
+            ? `${clientPrefix}🔴 Pago Vencido — Contrato ${p.contractNumber}`
+            : `${clientPrefix}🟡 Vence en ${p.daysLeft} día${p.daysLeft !== 1 ? 's' : ''} — Contrato ${p.contractNumber}`,
+          subtitle: `${p.headquartersName} • Vencimiento: ${p.dueDate}`,
+          detail: `Factura ${p.invoiceNumber} • Expedida: ${p.expeditionDate} • Total: ${p.totalToPay}`,
+          type: 'alarm'
+        };
+      });
       return [...missingAlarms, ...pendingAlarms];
     } else {
       // Use enriched alarms if available, otherwise fall back to alarmasItems
@@ -297,15 +304,18 @@ export class HomePage implements OnInit {
             const desc = (a.alarm_description ?? '').toLowerCase();
             return !cat.includes('comunic') && !desc.includes('comunic') && !desc.includes('communication');
           })
-          .map(a => ({
-            title: a.device_name ?? 'Equipo Alarmado',
-            subtitle: `${a.alarm_category ?? ''} • Severidad: ${a.severity ?? '—'}`,
-            detail: a.alarm_description ?? 'Sin descripción disponible.',
-            type: 'warning',
-            serial: a.serial_number_device ?? a.device_id ?? '—',
-            date: a.record_date ? a.record_date.split(/[ T]/)[0] : '—',
-            rawItem: a
-          }));
+          .map(a => {
+            const clientPrefix = this.hasMultipleCustomers() ? `[${this.getCustomerName(a)}] ` : '';
+            return {
+              title: `${clientPrefix}${a.device_name ?? 'Equipo Alarmado'}`,
+              subtitle: `${a.alarm_category ?? ''} • Severidad: ${a.severity ?? '—'}`,
+              detail: a.alarm_description ?? 'Sin descripción disponible.',
+              type: 'warning',
+              serial: a.serial_number_device ?? a.device_id ?? '—',
+              date: a.record_date ? a.record_date.split(/[ T]/)[0] : '—',
+              rawItem: a
+            };
+          });
       }
       return this.alarmasItems.map(a => ({
         title: 'Equipo en Alarma',
@@ -374,6 +384,7 @@ export class HomePage implements OnInit {
   alarmasItems: { equipo: string; serial: string; estado: string }[] = [];
   alarmasAbiertas: any[] = [];
   alarmGroupsExpanded: { [category: string]: boolean } = {};
+  alarmDeviceExpanded: { [key: string]: boolean } = {};
   deviceTypesCount: { type: string; total: number; critico: number; alerta: number; estable: number; pct: number; icon: string }[] = [];
   selectedDeviceType: string | null = null;
 
@@ -538,7 +549,9 @@ export class HomePage implements OnInit {
               expeditionDate: inv.expedition_date ?? '—',
               dueDate: inv.due_date,
               totalToPay: `$${inv.total_to_pay.toLocaleString('es-CO')}`,
-              daysLeft
+              daysLeft,
+              customerName: inv.customer_name || '',
+              customerId: inv.customer_id || ''
             });
           }
         }
@@ -594,7 +607,7 @@ export class HomePage implements OnInit {
    */
   private detectMissingInvoiceAlarms() {
     const today = new Date();
-    const alarms: { contractNumber: string; lastDate: string; expectedMonth: string }[] = [];
+    const alarms: typeof this.missingInvoiceAlarms = [];
 
     // Agrupar por contract_number
     const contractMap = new Map<string, any[]>();
@@ -659,7 +672,9 @@ export class HomePage implements OnInit {
         alarms.push({
           contractNumber,
           lastDate: lastDateStr,
-          expectedMonth: expectedMonthName
+          expectedMonth: expectedMonthName,
+          customerName: lastItem.customer_name || '',
+          customerId: lastItem.customer_id || ''
         });
       }
     });
@@ -937,6 +952,7 @@ export class HomePage implements OnInit {
     this.showUaiDetail = true;
     this.isLoadingUai = true;
     this.uaiDiagnostic = null;
+    this.scrollToTop();
 
     const problema = alarmFlag
       ? `El equipo ${card.equipo} presenta una condición crítica: ${card.quePasa}.`
@@ -1076,6 +1092,7 @@ export class HomePage implements OnInit {
     this.showUaiDetail = true;
     this.isLoadingUai = true;
     this.uaiDiagnostic = null;
+    this.scrollToTop();
 
     const problema = alarmFlag
       ? `El equipo ${nombre} presenta una condición crítica: ${indicador}.`
@@ -1255,7 +1272,7 @@ export class HomePage implements OnInit {
     };
   }
 
-  get groupedAlarms(): { category: string; icon: string; items: any[] }[] {
+  get groupedAlarms(): { category: string; icon: string; devices: any[] }[] {
     if (!this.alarmasAbiertas || this.alarmasAbiertas.length === 0) return [];
     
     const groupsMap = new Map<string, any[]>();
@@ -1276,11 +1293,70 @@ export class HomePage implements OnInit {
       return 'warning';
     };
 
-    return Array.from(groupsMap.entries()).map(([category, items]) => ({
-      category,
-      icon: getIcon(category),
-      items
-    }));
+    return Array.from(groupsMap.entries()).map(([category, items]) => {
+      const deviceMap = new Map<string, any[]>();
+      items.forEach(a => {
+        const devId = a.device_id ?? a.device_name ?? 'unknown';
+        if (!deviceMap.has(devId)) {
+          deviceMap.set(devId, []);
+        }
+        deviceMap.get(devId)!.push(a);
+      });
+
+      const devices = Array.from(deviceMap.entries()).map(([devId, alarms]) => {
+        const first = alarms[0];
+        return {
+          deviceId: devId,
+          // Clave única por categoría+equipo (un mismo equipo puede aparecer en varias categorías)
+          key: `${category}::${devId}`,
+          deviceName: first.device_name ?? 'Equipo sin nombre',
+          deviceType: first.device_type ?? 'Otros',
+          ipAddress: first.ip_address_device,
+          // Serial y cliente ahora viven a nivel del equipo (no se repiten por alarma)
+          serial: first.serial_number_device ?? first.device_id ?? '—',
+          customerName: this.getCustomerName(first),
+          // Precalculamos los días que lleva abierta cada alarma
+          alarms: alarms.map(a => ({ ...a, daysOpen: this.getDaysOpen(a.record_date) }))
+        };
+      });
+
+      return {
+        category,
+        icon: getIcon(category),
+        devices
+      };
+    });
+  }
+
+  hasMultipleCustomers(): boolean {
+    const company = this.authService.getCompany();
+    return !!company && company.includes('|');
+  }
+
+  getCustomerName(a: any): string {
+    if (a.customer_name) return a.customer_name;
+    const nits: Record<string, string> = {
+      '900471387': 'Sodexo',
+      '800122811': 'Bancolombia S.A',
+      '900123456': 'Cliente Prueba'
+    };
+    return nits[a.customer_id] || a.customer_id || 'Cliente Desconocido';
+  }
+
+  getAlarmsCount(group: any): number {
+    if (!group.devices) return 0;
+    return group.devices.reduce((acc: number, dev: any) => acc + dev.alarms.length, 0);
+  }
+
+  scrollToTop() {
+    setTimeout(() => {
+      this.ionContent?.scrollToTop(150);
+    }, 50);
+  }
+
+  getCardCustomerName(card: ActionCard): string {
+    if (!card.item) return '';
+    return this.getCustomerName(card.item);
   }
 
   get groupedVariables(): { label: string; icon: string; items: UaiVariable[] }[] {

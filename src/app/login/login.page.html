@@ -35,6 +35,13 @@
 
     <div class="action-container">
       <ion-button expand="block" class="btn-uai-ingresar" (click)="onLogin()">INGRESAR</ion-button>
+
+      @if (biometricEnabled) {
+        <button class="btn-uai-biometric" (click)="loginWithBiometrics()">
+          <ion-icon [name]="biometricIcon"></ion-icon>
+          <span>Ingresar con {{ biometricLabel }}</span>
+        </button>
+      }
     </div>
 
     <div class="footer-container" [class.keyboard-hidden]="keyboardOpen">

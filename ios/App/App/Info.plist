@@ -47,5 +47,7 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>UAI usa Face ID para permitirte iniciar sesión de forma rápida y segura.</string>
 </dict>
 </plist>

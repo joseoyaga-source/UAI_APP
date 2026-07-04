@@ -595,7 +595,12 @@
                     <button *ngFor="let card of cardsForLevel('critico')"
                       (click)="showUaiDetailFor(card)" class="action-card action-card--crit">
                       <div class="action-card__header">
-                        <span class="action-card__name">{{ card.equipo }}</span>
+                        <div class="flex flex-col items-start text-left flex-1 min-w-0">
+                          <span *ngIf="hasMultipleCustomers()" class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#29E490]/15 text-[#29E490] uppercase tracking-wider mb-1">
+                            Cliente: {{ getCardCustomerName(card) }}
+                          </span>
+                          <span class="action-card__name">{{ card.equipo }}</span>
+                        </div>
                         <span class="action-card__badge badge--crit">
                           <span class="material-symbols-outlined badge-icon">emergency</span>CRÍTICO
                         </span>
@@ -625,7 +630,12 @@
                     <button *ngFor="let card of cardsForLevel('alerta')"
                       (click)="showUaiDetailFor(card)" class="action-card action-card--warn">
                       <div class="action-card__header">
-                        <span class="action-card__name">{{ card.equipo }}</span>
+                        <div class="flex flex-col items-start text-left flex-1 min-w-0">
+                          <span *ngIf="hasMultipleCustomers()" class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#29E490]/15 text-[#29E490] uppercase tracking-wider mb-1">
+                            Cliente: {{ getCardCustomerName(card) }}
+                          </span>
+                          <span class="action-card__name">{{ card.equipo }}</span>
+                        </div>
                         <span class="action-card__badge badge--warn">
                           <span class="material-symbols-outlined badge-icon">warning_amber</span>ALERTA
                         </span>
@@ -655,7 +665,12 @@
                     <button *ngFor="let card of cardsForLevel('estable')"
                       (click)="showUaiDetailFor(card)" class="action-card action-card--ok">
                       <div class="action-card__header">
-                        <span class="action-card__name">{{ card.equipo }}</span>
+                        <div class="flex flex-col items-start text-left flex-1 min-w-0">
+                          <span *ngIf="hasMultipleCustomers()" class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#29E490]/15 text-[#29E490] uppercase tracking-wider mb-1">
+                            Cliente: {{ getCardCustomerName(card) }}
+                          </span>
+                          <span class="action-card__name">{{ card.equipo }}</span>
+                        </div>
                         <span class="action-card__badge badge--ok">
                           <span class="material-symbols-outlined badge-icon">check_circle</span>ESTABLE
                         </span>
@@ -708,7 +723,7 @@
                     </div>
                     <div class="flex items-center gap-2">
                       <span class="bg-white/10 px-2 py-0.5 rounded-full text-[10px] font-bold text-[#91A2B8]">
-                        {{ group.items.length }} Alarma{{ group.items.length !== 1 ? 's' : '' }}
+                        {{ getAlarmsCount(group) }} Alarma{{ getAlarmsCount(group) !== 1 ? 's' : '' }}
                       </span>
                       <span class="material-symbols-outlined text-sm text-[#91A2B8] transition-transform duration-300"
                             [class.rotate-180]="alarmGroupsExpanded[group.category]">expand_more</span>
@@ -716,71 +731,82 @@
                   </button>
 
                   <!-- Alarmas del Grupo (contraído por defecto) -->
-                  <div *ngIf="alarmGroupsExpanded[group.category]" class="space-y-3">
-                    <div *ngFor="let a of group.items" 
-                         (click)="handleAlarmClick(a)"
-                         class="rounded-2xl border border-white/5 bg-surface-container-low p-5 shadow-lg space-y-3 cursor-pointer hover:border-white/10 hover:bg-surface-container-high transition-all duration-200 border-l-[4px]"
-                         [ngClass]="{
-                           'border-l-[#EF4444]': a.severity === 'Falla' || a.severity === 'Crítico',
-                           'border-l-[#F59E0B]': a.severity === 'Advertencia' || a.severity === 'Alerta',
-                           'border-l-[#29E490]': a.severity !== 'Falla' && a.severity !== 'Crítico' && a.severity !== 'Advertencia' && a.severity !== 'Alerta'
-                         }">
+                  <div *ngIf="alarmGroupsExpanded[group.category]" class="space-y-4">
+                    <div *ngFor="let dev of group.devices" class="rounded-2xl border border-white/10 bg-surface-container-low p-5 shadow-lg space-y-4">
                       
-                      <!-- Cabecera de Alarma: Nombre de Equipo y Severidad -->
-                      <div class="flex items-start justify-between gap-4">
-                        <h3 class="text-[#FDFEF0] font-black text-base tracking-tight leading-tight flex-1">{{ a.device_name ?? 'Equipo sin nombre' }}</h3>
-                        <span class="text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider text-right"
-                              [ngClass]="{
-                                'bg-[#EF4444]/20 text-[#EF4444]': a.severity === 'Falla' || a.severity === 'Crítico',
-                                'bg-[#F59E0B]/20 text-[#F59E0B]': a.severity === 'Advertencia' || a.severity === 'Alerta',
-                                'bg-[#29E490]/20 text-[#29E490]': a.severity !== 'Falla' && a.severity !== 'Crítico' && a.severity !== 'Advertencia' && a.severity !== 'Alerta'
-                              }">
-                          {{ a.severity ?? 'Info' }}
-                        </span>
-                      </div>
-
-                      <!-- Categoría y Tipo -->
-                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[#91A2B8] font-semibold">
-                        <span class="flex items-center gap-1">
-                          <span class="material-symbols-outlined text-xs">category</span>
-                          {{ a.alarm_category ?? 'Alarma' }}
-                        </span>
-                        <span class="text-white/20">•</span>
-                        <span class="flex items-center gap-1">
-                          <span class="material-symbols-outlined text-xs">precision_manufacturing</span>
-                          {{ a.device_type ?? 'Otros' }}
-                        </span>
-                      </div>
-
-                      <!-- Descripción de la Falla -->
-                      <p class="text-xs text-[#FDFEF0]/90 leading-relaxed bg-[#014751]/30 p-3.5 rounded-xl border border-white/5 font-medium">
-                        {{ a.alarm_description ?? 'Sin descripción detallada disponible.' }}
-                      </p>
-
-                      <!-- Info Footer -->
-                      <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/5 text-[9px] text-[#91A2B8] font-bold">
-                        <div class="flex items-center gap-3">
-                          <span class="flex items-center gap-1">
-                            <span class="material-symbols-outlined text-xs text-white/40">calendar_today</span>
-                            {{ a.record_date ? a.record_date.substring(0, 10) : '—' }}
-                          </span>
-                          <span class="flex items-center gap-1" *ngIf="a.ip_address_device">
-                            <span class="material-symbols-outlined text-xs text-white/40">dns</span>
-                            IP: {{ a.ip_address_device }}
-                          </span>
+                      <!-- Cabecera del Recuadro de Equipo -->
+                      <div class="flex items-start justify-between border-b border-white/5 pb-3">
+                        <div>
+                          <h4 class="text-[#FDFEF0] font-black text-base tracking-tight leading-tight">{{ dev.deviceName }}</h4>
+                          <div class="flex items-center gap-2 text-[10px] text-[#91A2B8] font-bold mt-1">
+                            <span class="flex items-center gap-1">
+                              <span class="material-symbols-outlined text-[12px]">precision_manufacturing</span>
+                              {{ dev.deviceType }}
+                            </span>
+                            <span *ngIf="dev.ipAddress" class="text-white/20">•</span>
+                            <span *ngIf="dev.ipAddress" class="flex items-center gap-1">
+                              <span class="material-symbols-outlined text-[12px]">dns</span>
+                              IP: {{ dev.ipAddress }}
+                            </span>
+                          </div>
                         </div>
-                        <span class="flex items-center gap-1">
-                          <span class="material-symbols-outlined text-xs text-white/40">tag</span>
-                          SN: {{ a.device_id }}
+                        <span class="bg-[#29E490]/15 border border-[#29E490]/30 px-2.5 py-0.5 rounded-full text-[9px] font-bold text-[#29E490] uppercase tracking-wider">
+                          {{ dev.alarms.length }} Alarma{{ dev.alarms.length !== 1 ? 's' : '' }}
                         </span>
                       </div>
-                      
-                      <!-- CTA Diagnóstico -->
-                      <div class="flex justify-start pt-1">
-                        <span class="text-[#29E490] text-[10px] font-black tracking-widest uppercase flex items-center gap-1 hover:text-[#29E490]/80">
-                          Ver diagnóstico UAI Expert
-                          <span class="material-symbols-outlined text-xs">chevron_right</span>
-                        </span>
+
+                      <!-- Listado de alarmas de este equipo -->
+                      <div class="space-y-3">
+                        <div *ngFor="let a of dev.alarms" 
+                             (click)="handleAlarmClick(a)"
+                             class="rounded-xl border border-white/5 bg-[#014751]/10 p-4 hover:bg-surface-container-high transition-all duration-200 border-l-[3px] space-y-2 cursor-pointer"
+                             [ngClass]="{
+                               'border-l-[#EF4444]': a.severity === 'Falla' || a.severity === 'Crítico',
+                               'border-l-[#F59E0B]': a.severity === 'Advertencia' || a.severity === 'Alerta',
+                               'border-l-[#29E490]': a.severity !== 'Falla' && a.severity !== 'Crítico' && a.severity !== 'Advertencia' && a.severity !== 'Alerta'
+                             }">
+                          
+                          <!-- Nombre/Tipo de Alarma y Severidad -->
+                          <div class="flex items-center justify-between gap-3">
+                            <span *ngIf="hasMultipleCustomers()" class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#29E490]/15 text-[#29E490] uppercase tracking-wider">
+                              Cliente: {{ getCustomerName(a) }}
+                            </span>
+                            <span class="text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ml-auto"
+                                  [ngClass]="{
+                                    'bg-[#EF4444]/20 text-[#EF4444]': a.severity === 'Falla' || a.severity === 'Crítico',
+                                    'bg-[#F59E0B]/20 text-[#F59E0B]': a.severity === 'Advertencia' || a.severity === 'Alerta',
+                                    'bg-[#29E490]/20 text-[#29E490]': a.severity !== 'Falla' && a.severity !== 'Crítico' && a.severity !== 'Advertencia' && a.severity !== 'Alerta'
+                                  }">
+                              {{ a.severity ?? 'Info' }}
+                            </span>
+                          </div>
+
+                          <!-- Descripción de la Falla -->
+                          <p class="text-xs text-[#FDFEF0]/90 leading-relaxed font-medium">
+                            {{ a.alarm_description ?? 'Sin descripción detallada disponible.' }}
+                          </p>
+
+                          <!-- Info Footer -->
+                          <div class="flex items-center justify-between text-[9px] text-[#91A2B8] font-bold pt-1 border-t border-white/5">
+                            <span class="flex items-center gap-1">
+                              <span class="material-symbols-outlined text-[10px] text-white/40">calendar_today</span>
+                              {{ a.record_date ? a.record_date.substring(0, 10) : '—' }}
+                            </span>
+                            <span class="flex items-center gap-1">
+                              <span class="material-symbols-outlined text-[10px] text-white/40">tag</span>
+                              SN: {{ a.device_id }}
+                            </span>
+                          </div>
+
+                          <!-- CTA Diagnóstico -->
+                          <div class="flex justify-start pt-1">
+                            <span class="text-[#29E490] text-[9px] font-black tracking-widest uppercase flex items-center gap-0.5 hover:text-[#29E490]/80">
+                              Ver diagnóstico UAI Expert
+                              <span class="material-symbols-outlined text-[10px]">chevron_right</span>
+                            </span>
+                          </div>
+
+                        </div>
                       </div>
 
                     </div>
