@@ -1381,6 +1381,21 @@ export class HomePage implements OnInit {
     this.alarmGroupsExpanded[category] = !this.alarmGroupsExpanded[category];
   }
 
+  /** Expande/contrae las alarmas de un equipo específico */
+  toggleAlarmDevice(key: string) {
+    this.alarmDeviceExpanded[key] = !this.alarmDeviceExpanded[key];
+  }
+
+  /** Días transcurridos desde que se abrió la alarma (record_date) hasta hoy */
+  getDaysOpen(recordDate: string | null | undefined): number {
+    if (!recordDate) return 0;
+    const start = new Date(recordDate);
+    if (isNaN(start.getTime())) return 0;
+    const today = new Date();
+    const diff = today.getTime() - start.getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+  }
+
 
 
   collapseAllGroups() {
