@@ -76,6 +76,29 @@ export class LoginPage implements OnInit, OnDestroy {
     });
   }
 
+  /**
+   * Muestra un aviso de funcionalidad en construcción al pulsar
+   * "¿Olvidaste tu contraseña?". Se cierra con el botón OK o
+   * automáticamente a los 5 segundos.
+   */
+  async onForgotPassword() {
+    const alert = await this.alertController.create({
+      header: 'Función en construcción',
+      message: 'Estamos trabajando para que tengas esta funcionalidad. Mientras tanto, comunícate con el administrador.',
+      buttons: ['OK']
+    });
+
+    await alert.present();
+
+    // Cierre automático a los 5 segundos si el usuario no la cerró antes
+    const timer = setTimeout(() => {
+      alert.dismiss();
+    }, 5000);
+
+    // Si el usuario cierra manualmente, cancelamos el temporizador
+    alert.onDidDismiss().then(() => clearTimeout(timer));
+  }
+
   onLogin() {
     if (this.email && this.password) {
       console.log('Disparando conexión real hacia Keycloak para:', this.email);
