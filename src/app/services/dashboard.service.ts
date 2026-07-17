@@ -39,6 +39,7 @@ export interface FacturaItem {
   item_type: 'Costo' | 'Consumo' | 'Tarifa';
   group_item: string;
   headquarters_name: string;
+  headquarters_id?: string;
 }
 
 // --- Interfaces para el frontend (dashboard) ---
@@ -77,6 +78,43 @@ export interface FacturasDashboard {
 
 export type PeriodoFilter = 'mes_actual' | 'ano_actual' | 'ano_pasado';
 
+// --- Interfaz para descarga_facturas_estados ---
+export interface DescargaFacturaEstadoItem {
+  id: string;
+  contract_number: string;
+  invoice_number: string;
+  billing_period: string;
+  due_date: string;
+  expedition_date: string;
+  payment_status: 'Vencida' | 'Pagada' | 'Pendiente';
+  payment_date: string | null;
+  days_overdue: number;
+  city: string;
+  address: string;
+  customer_id: string;
+  customer_name: string;
+  pdf_bucket_name: string;
+  pdf_file_name: string;
+  total_to_pay: number;
+  payment_link: string;
+  headquarters_name: string;
+  provider_name: string;
+}
+
+// --- Interfaz para contratos_sin_facturas_completas ---
+export interface ContratoSinFacturaCompletaItem {
+  provider_name: string;
+  contract_number: string;
+  customer_id: string;
+  customer_name: string;
+  headquarters_name: string;
+  city: string;
+  address: string;
+  missing_month: string;
+  expected_invoice_date: string;
+  days_overdue: number;
+}
+
 /** Item del reporte resumen ejecutivo (monitoreo_equipos) */
 export interface ResumenEjecutivoItem {
   equipo: string;
@@ -100,8 +138,10 @@ export class DashboardService {
 
   /** Perfiles Accept-Profile por endpoint */
   private readonly acceptProfiles: Record<string, string> = {
-    reporte_dashboard_facturas: 'etl_facturas_servicios_publicos',
+    reporte_historicos_consumos: 'etl_facturas_servicios_publicos',
     reporte_datos_basicos_facturas: 'etl_facturas_servicios_publicos',
+    descarga_facturas_estados: 'etl_facturas_servicios_publicos',
+    contratos_sin_facturas_completas: 'etl_facturas_servicios_publicos',
     reporte_resumen_ejecutivo: 'monitoreo_equipos',
     reporte_mantenimiento: 'monitoreo_equipos',
     reporte_alarmas_abiertas: 'monitoreo_equipos',
@@ -109,7 +149,7 @@ export class DashboardService {
     reporte_telemetria_mensual: 'monitoreo_sedes'
   };
 
-  private getHeaders(endpoint: string = 'reporte_dashboard_facturas'): HttpHeaders {
+  private getHeaders(endpoint: string = 'reporte_historicos_consumos'): HttpHeaders {
     return new HttpHeaders({
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${environment.apiBearerToken}`,
@@ -213,7 +253,7 @@ export class DashboardService {
       `expedition_date=gte.${gte}`,
       `expedition_date=lte.${lte}`
     ].filter(p => p).join('&');
-    return `${this.apiBase}/reporte_dashboard_facturas?${queryParams}`;
+    return `${this.apiBase}/reporte_historicos_consumos?${queryParams}`;
   }
 
   /** Obtiene datos crudos de la API filtrados por período */
@@ -233,7 +273,7 @@ export class DashboardService {
       `expedition_date=gte.${inicio}`,
       `expedition_date=lte.${fin}`
     ].filter(p => p).join('&');
-    const url = `${this.apiBase}/reporte_dashboard_facturas?${queryParams}`;
+    const url = `${this.apiBase}/reporte_historicos_consumos?${queryParams}`;
     return this.http.get<FacturaItem[]>(url, { headers: this.getHeaders() });
   }
 
@@ -521,6 +561,40 @@ export class DashboardService {
     }).pipe(
       catchError(err => {
         console.error('Error en reporte_estados_contratos:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /**
+   * Obtiene el estado de pago de todas las facturas del cliente
+   * desde la vista descarga_facturas_estados.
+   */
+  getDescargaFacturasEstados(): Observable<DescargaFacturaEstadoItem[]> {
+    const filter = this.getCustomerFilter('facturas');
+    const url = `${this.apiBase}/descarga_facturas_estados` + (filter ? `?${filter}` : '');
+    return this.http.get<DescargaFacturaEstadoItem[]>(url, {
+      headers: this.getHeaders('descarga_facturas_estados')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en descarga_facturas_estados:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /**
+   * Obtiene los contratos que tienen meses de factura faltantes
+   * desde la vista contratos_sin_facturas_completas.
+   */
+  getContratosSinFacturasCompletas(): Observable<ContratoSinFacturaCompletaItem[]> {
+    const filter = this.getCustomerFilter('facturas');
+    const url = `${this.apiBase}/contratos_sin_facturas_completas` + (filter ? `?${filter}` : '');
+    return this.http.get<ContratoSinFacturaCompletaItem[]>(url, {
+      headers: this.getHeaders('contratos_sin_facturas_completas')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en contratos_sin_facturas_completas:', err);
         return of([]);
       })
     );

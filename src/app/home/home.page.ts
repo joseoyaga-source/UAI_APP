@@ -5,7 +5,7 @@ import { IonContent } from '@ionic/angular/standalone';
 import { Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { AuthService } from '../services/auth';
-import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura } from '../services/dashboard.service';
+import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura, DescargaFacturaEstadoItem, ContratoSinFacturaCompletaItem } from '../services/dashboard.service';
 
 interface PeriodoOption {
   value: PeriodoFilter;
@@ -249,18 +249,73 @@ export class HomePage implements OnInit {
   get contratosAgrupados(): { estado: string; items: any[] }[] {
     const groups: Record<string, any[]> = {};
     for (const c of this.estadosContratos) {
-      const key = c.state || 'Otro';
+      const key = c.state || c.status || 'Otro';
       if (!groups[key]) groups[key] = [];
       groups[key].push(c);
     }
-    // Activo primero
+    // Activo primero, luego Piloto, luego los demás
+    const priority = ['Activo', 'Piloto'];
     return Object.entries(groups)
-      .sort(([a], [b]) => (a === 'Activo' ? -1 : b === 'Activo' ? 1 : a.localeCompare(b)))
+      .sort(([a], [b]) => {
+        const idxA = priority.indexOf(a);
+        const idxB = priority.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+      })
       .map(([estado, items]) => ({ estado, items }));
   }
 
   toggleContratosGroup(estado: string) {
+    if (this.contratosGroupsExpanded[estado] === undefined) {
+      this.contratosGroupsExpanded[estado] = false;
+    }
     this.contratosGroupsExpanded[estado] = !this.contratosGroupsExpanded[estado];
+  }
+
+  getContratoGroupHeaderClass(estado: string): string {
+    const est = (estado || '').toLowerCase();
+    if (est === 'activo' || est === 'piloto') {
+      return 'bg-[#014751] border-[#29E490]/20';
+    }
+    if (est === 'cancelado' || est === 'inactivo') {
+      return 'bg-[#1b1b1c] border-white/10';
+    }
+    return 'bg-[#1b1b1c] border-white/5';
+  }
+
+  getContratoGroupIconClass(estado: string): string {
+    const est = (estado || '').toLowerCase();
+    if (est === 'activo' || est === 'piloto') {
+      return 'text-[#29E490]';
+    }
+    if (est === 'cancelado' || est === 'inactivo') {
+      return 'text-[#EF4444]';
+    }
+    return 'text-[#91A2B8]';
+  }
+
+  getContratoGroupIcon(estado: string): string {
+    const est = (estado || '').toLowerCase();
+    if (est === 'activo' || est === 'piloto') {
+      return 'check_circle';
+    }
+    if (est === 'cancelado' || est === 'inactivo') {
+      return 'cancel';
+    }
+    return 'help';
+  }
+
+  getContratoGroupBadgeClass(estado: string): string {
+    const est = (estado || '').toLowerCase();
+    if (est === 'activo' || est === 'piloto') {
+      return 'bg-[#29E490]/20 text-[#29E490]';
+    }
+    if (est === 'cancelado' || est === 'inactivo') {
+      return 'bg-[#EF4444]/20 text-[#EF4444]';
+    }
+    return 'bg-white/10 text-[#91A2B8]';
   }
 
   // --- Mock Data para Historial ---
@@ -517,31 +572,27 @@ export class HomePage implements OnInit {
   }
 
   /**
-   * Carga las facturas básicas desde reporte_datos_basicos_facturas.
-   * Filtra las que tienen payment_date nulo (no pagadas) y cuya due_date
-   * vence en 5 días o menos (incluyendo vencidas). Genera alarmas para cada una.
+   * Carga alarmas de pago desde descarga_facturas_estados.
+   * Alarma si payment_status === 'Vencida' o si es 'Pendiente' y faltan ≤ 5 días para due_date.
    */
   private loadPendingPaymentAlarms() {
-    this.dashboardService.getDatosBasicosFacturas().subscribe({
-      next: (items: DatosBasicosFactura[]) => {
+    this.dashboardService.getDescargaFacturasEstados().subscribe({
+      next: (items: DescargaFacturaEstadoItem[]) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const DAYS_THRESHOLD = 5;
 
         const alarms: typeof this.pendingPaymentAlarms = [];
 
-        // Filtrar solo las no pagadas
-        const unpaid = items.filter(i => !i.payment_date);
-
-        for (const inv of unpaid) {
-          if (!inv.due_date) continue;
+        for (const inv of items) {
+          if (inv.payment_status === 'Pagada') continue;
 
           const due = new Date(inv.due_date);
           due.setHours(0, 0, 0, 0);
           const daysLeft = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-          // Alarmar si ya venció (sin límite) O vence en ≤ 5 días
-          if (daysLeft <= DAYS_THRESHOLD) {
+          // Alarmar si está vencida o si es pendiente y vence en ≤ 5 días
+          if (inv.payment_status === 'Vencida' || (inv.payment_status === 'Pendiente' && daysLeft <= DAYS_THRESHOLD)) {
             alarms.push({
               invoiceNumber: inv.invoice_number,
               contractNumber: inv.contract_number,
@@ -558,10 +609,10 @@ export class HomePage implements OnInit {
 
         // Ordenar: primero los vencidos (daysLeft negativo), luego por urgencia
         this.pendingPaymentAlarms = alarms.sort((a, b) => a.daysLeft - b.daysLeft);
-        console.log(`💳 Facturas pendientes de pago con alarma: ${alarms.length}`, alarms);
+        console.log(`💳 Alarmas de pago (descarga_facturas_estados): ${alarms.length}`, alarms);
       },
       error: (err) => {
-        console.error('❌ Error al cargar facturas básicas:', err);
+        console.error('❌ Error al cargar descarga_facturas_estados:', err);
       }
     });
   }
@@ -588,99 +639,41 @@ export class HomePage implements OnInit {
       }
     });
 
-    // Cargar items crudos del año actual para detectar facturas faltantes
-    this.dashboardService.getReporteFacturas('ano_actual').subscribe({
-      next: (rawItems) => {
-        this.facturasRawItems = rawItems || [];
-        this.detectMissingInvoiceAlarms();
-      },
-      error: (err) => {
-        console.error('❌ Error al cargar raw facturas para alarmas:', err);
-      }
-    });
+    // Cargar alarmas de facturas faltantes desde contratos_sin_facturas_completas
+    this.loadMissingInvoiceAlarms();
   }
 
   /**
-   * Para cada contract_number, obtiene la última factura (por expedition_date).
-   * Si el mes de la última factura NO es el mes actual, y ya pasaron más de 2 días
-   * desde el inicio del mes en que esperábamos la factura, se genera una alarma.
+   * Carga alarmas de facturas faltantes desde contratos_sin_facturas_completas.
+   * Solo alarma si days_overdue > 0 (ya pasó la fecha esperada de la factura).
    */
-  private detectMissingInvoiceAlarms() {
-    const today = new Date();
-    const alarms: typeof this.missingInvoiceAlarms = [];
+  private loadMissingInvoiceAlarms() {
+    this.dashboardService.getContratosSinFacturasCompletas().subscribe({
+      next: (items: ContratoSinFacturaCompletaItem[]) => {
+        const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-    // Agrupar por contract_number
-    const contractMap = new Map<string, any[]>();
-    for (const item of this.facturasRawItems) {
-      if (!item.contract_number || !item.expedition_date) continue;
-      if (!contractMap.has(item.contract_number)) {
-        contractMap.set(item.contract_number, []);
-      }
-      contractMap.get(item.contract_number)!.push(item);
-    }
+        const alarms: typeof this.missingInvoiceAlarms = items
+          .filter(i => i.days_overdue > 0)
+          .map(i => {
+            const missingDate = new Date(i.missing_month);
+            const expectedMonthName = `${monthNames[missingDate.getMonth()]} ${missingDate.getFullYear()}`;
+            return {
+              contractNumber: i.contract_number,
+              lastDate: `${i.expected_invoice_date}`,
+              expectedMonth: expectedMonthName,
+              customerName: i.customer_name || '',
+              customerId: i.customer_id || ''
+            };
+          });
 
-    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-                        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
-    contractMap.forEach((items, contractNumber) => {
-      // Obtener la factura más reciente por expedition_date
-      const sorted = items
-        .filter(i => i.expedition_date)
-        .sort((a, b) => new Date(b.expedition_date).getTime() - new Date(a.expedition_date).getTime());
-
-      if (sorted.length === 0) return;
-
-      const lastItem = sorted[0];
-      const lastDate = new Date(lastItem.expedition_date);
-
-      // Mes esperado = mes siguiente al de la última factura
-      const expectedMonth = lastDate.getMonth() + 1; // 0-indexed: +1 = siguiente mes
-      const expectedYear = expectedMonth > 11
-        ? lastDate.getFullYear() + 1
-        : lastDate.getFullYear();
-      const expectedMonthIndex = expectedMonth > 11 ? 0 : expectedMonth;
-
-      // Si ya estamos en el mes esperado o más tarde
-      const todayMonth = today.getMonth();
-      const todayYear = today.getFullYear();
-
-      const isExpectedMonthOrLater =
-        todayYear > expectedYear ||
-        (todayYear === expectedYear && todayMonth >= expectedMonthIndex);
-
-      if (!isExpectedMonthOrLater) return;
-
-      // Verificar si ya existe una factura para el mes esperado en los datos
-      const hasInvoiceForExpectedMonth = items.some(i => {
-        if (!i.expedition_date) return false;
-        const d = new Date(i.expedition_date);
-        return d.getMonth() === expectedMonthIndex && d.getFullYear() === expectedYear;
-      });
-
-      if (hasInvoiceForExpectedMonth) return;
-
-      // Calcular días desde el inicio del mes esperado
-      const startOfExpectedMonth = new Date(expectedYear, expectedMonthIndex, 1);
-      const daysSinceExpected = Math.floor(
-        (today.getTime() - startOfExpectedMonth.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      // Disparar alarma si han pasado más de 2 días sin recibir la factura
-      if (daysSinceExpected >= 2) {
-        const lastDateStr = `${lastDate.getDate()} de ${monthNames[lastDate.getMonth()]} ${lastDate.getFullYear()}`;
-        const expectedMonthName = `${monthNames[expectedMonthIndex]} ${expectedYear}`;
-        alarms.push({
-          contractNumber,
-          lastDate: lastDateStr,
-          expectedMonth: expectedMonthName,
-          customerName: lastItem.customer_name || '',
-          customerId: lastItem.customer_id || ''
-        });
+        this.missingInvoiceAlarms = alarms;
+        console.log(`🔔 Facturas faltantes (contratos_sin_facturas_completas): ${alarms.length}`, alarms);
+      },
+      error: (err) => {
+        console.error('❌ Error al cargar contratos_sin_facturas_completas:', err);
       }
     });
-
-    this.missingInvoiceAlarms = alarms;
-    console.log(`🔔 Facturas faltantes detectadas: ${alarms.length}`, alarms);
   }
 
   /** Carga datos de infraestructura desde reporte_resumen_ejecutivo */

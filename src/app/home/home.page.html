@@ -1,7 +1,7 @@
 <ion-content [fullscreen]="true" class="bg-background" style="--background: radial-gradient(circle at 10% 0%, #014751 0%, #022022 45%, #011214 100%) !important;" (click)="showContextDropdown = false">
   
   <!-- ═══ HEADER ═══ -->
-  <header class="relative bg-[#022022]/95 backdrop-blur-2xl flex justify-between items-center w-full px-4 py-3 fixed top-0 z-50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] border-b border-surface-border">
+  <header class="bg-[#022022]/95 backdrop-blur-2xl flex justify-between items-center w-full px-4 py-3 fixed top-0 z-50 shadow-[0_10px_30px_rgba(0,0,0,0.3)] border-b border-surface-border" style="padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);">
 
     <!-- Hamburger ☰ → abre dropdown de módulos -->
     <div class="flex items-center gap-2 flex-shrink-0 relative">
@@ -136,7 +136,7 @@
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-6 pb-36 space-y-6 pt-[58px]">
+  <main class="max-w-7xl mx-auto px-6 pb-36" style="padding-top: calc(env(safe-area-inset-top, 0px) + 80px);">
     <ng-container *ngIf="activeTab === 'resumen'">
       <div class="space-y-3 animate-fade-in pb-10">
 
@@ -878,19 +878,15 @@
               <!-- Header colapsable del grupo -->
               <button (click)="toggleContratosGroup(group.estado)"
                       class="w-full flex items-center justify-between rounded-2xl px-4 py-3 border transition-all duration-200"
-                      [ngClass]="group.estado === 'Activo'
-                        ? 'bg-[#014751] border-[#29E490]/20'
-                        : 'bg-[#1b1b1c] border-white/10'">
+                      [ngClass]="getContratoGroupHeaderClass(group.estado)">
                 <div class="flex items-center gap-3">
                   <span class="material-symbols-outlined text-lg"
-                        [ngClass]="group.estado === 'Activo' ? 'text-[#29E490]' : 'text-[#EF4444]'">
-                    {{ group.estado === 'Activo' ? 'check_circle' : 'cancel' }}
+                        [ngClass]="getContratoGroupIconClass(group.estado)">
+                    {{ getContratoGroupIcon(group.estado) }}
                   </span>
                   <span class="text-sm font-black text-[#FDFEF0] tracking-tight">{{ group.estado }}</span>
                   <span class="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                        [ngClass]="group.estado === 'Activo'
-                          ? 'bg-[#29E490]/20 text-[#29E490]'
-                          : 'bg-[#EF4444]/20 text-[#EF4444]'">
+                        [ngClass]="getContratoGroupBadgeClass(group.estado)">
                     {{ group.items.length }}
                   </span>
                 </div>
@@ -1026,7 +1022,7 @@
 
 
     <!-- Barra de navegación móvil (Efecto cristal translúcido con glassmorphism) -->
-    <nav slot="fixed" class="md:hidden fixed bottom-6 left-0 right-0 z-50 flex justify-between items-center h-16 bg-[#014751]/30 backdrop-blur-xl w-[90%] max-w-md mx-auto rounded-full p-1.5 border border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.5)]">
+    <nav slot="fixed" class="md:hidden fixed bottom-6 left-0 right-0 z-50 flex justify-between items-center h-16 bg-[#014751]/30 backdrop-blur-xl w-[90%] max-w-md mx-auto rounded-full p-1.5 border border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.5)]" style="margin-bottom: env(safe-area-inset-bottom, 0px);">
 
         <!-- Tab Izquierda (Facturas) -->
         <button *ngIf="currentContext === 'Gestión de Facturas'" aria-label="Resumen" (click)="switchTab('resumen')"
