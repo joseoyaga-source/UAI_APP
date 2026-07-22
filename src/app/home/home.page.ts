@@ -5,7 +5,8 @@ import { IonContent } from '@ionic/angular/standalone';
 import { Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { AuthService } from '../services/auth';
-import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura, DescargaFacturaEstadoItem, ContratoSinFacturaCompletaItem } from '../services/dashboard.service';
+import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura, DescargaFacturaEstadoItem, ContratoSinFacturaCompletaItem, FacturaItem, TelemetriaMensualItem, TelemetriaHorariaItem } from '../services/dashboard.service';
+import { forkJoin, of } from 'rxjs';
 
 interface PeriodoOption {
   value: PeriodoFilter;
@@ -57,6 +58,34 @@ interface UaiDiagnostic {
   variables: UaiVariable[];
 }
 
+interface SensorCard {
+  sensorName: string;
+  variable: string;
+  unit: string;
+  icon: string;
+  headquarters: string;
+  currentAvg: number;
+  currentMax: number;
+  currentMin: number;
+  compareAvg: number;
+  currentSum: number;
+  compareSum: number;
+  variationPct: number;
+  variationLabel: string;
+  currentTrendPath: string;
+  currentTrendAreaPath: string;
+  compareTrendPath: string;
+  compareTrendAreaPath: string;
+  valueLabel?: string;
+}
+
+interface TelemetryGroup {
+  name: string;
+  icon: string;
+  isExpanded: boolean;
+  cards: SensorCard[];
+}
+
 interface InfraData {
   efficiency: string;
   status: string;
@@ -72,14 +101,14 @@ interface InfraData {
   imports: [IonContent, CommonModule, FormsModule]
 })
 export class HomePage implements OnInit {
-  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' = 'resumen';
+  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' = 'resumen';
   infraItems: ResumenEjecutivoItem[] = [];
   showProfileDropdown = false;
   @ViewChild('profileDropdown') profileDropdown?: ElementRef;
   @ViewChild(IonContent) ionContent?: IonContent;
 
   // --- App Shell Context Switcher ---
-  currentContext: 'Gestión de Facturas' | 'Infraestructura' = 'Gestión de Facturas';
+  currentContext: 'Gestión de Facturas' | 'Infraestructura' | 'Medición Inteligente' = 'Gestión de Facturas';
   showContextDropdown = false;
 
   userCompany = 'Bancolombia S.A';
@@ -230,6 +259,18 @@ export class HomePage implements OnInit {
   isLoadingFacturas = false;
   facturasError = '';
 
+  // --- Filtro por Empresa ---
+  selectedCompanyId = 'todos';
+  availableCompanies: { id: string; name: string }[] = [];
+  showCompanyDropdown = false;
+
+  // Respaldos crudos de datos sin filtrar
+  rawFacturasCurrent: FacturaItem[] = [];
+  rawFacturasCompare: FacturaItem[] = [];
+  rawEstadosContratos: any[] = [];
+  rawPendingPaymentAlarms: any[] = [];
+  rawMissingInvoiceAlarms: any[] = [];
+
   // --- Alarmas por facturas faltantes (por contrato) ---
   facturasRawItems: any[] = [];
   missingInvoiceAlarms: { contractNumber: string; lastDate: string; expectedMonth: string; customerName?: string; customerId?: string }[] = [];
@@ -317,6 +358,21 @@ export class HomePage implements OnInit {
     }
     return 'bg-white/10 text-[#91A2B8]';
   }
+
+  // --- Medición Inteligente ---
+  telemetriaMensualItems: TelemetriaMensualItem[] = [];
+  telemetriaDiariaItems: TelemetriaMensualItem[] = [];
+  telemetriaDiariaItemsCompare: TelemetriaMensualItem[] = [];
+  telemetriaHorariaItems: TelemetriaHorariaItem[] = [];
+  telemetriaHorariaItemsCompare: TelemetriaHorariaItem[] = [];
+  isLoadingTelemetria = false;
+  telemetriaError = '';
+  availableSedes: string[] = [];
+  selectedSede = 'todas';
+  showSedeDropdown = false;
+  selectedTelemetriaMonth: { year: number; month: number } = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+  selectedTelemetriaDate: string = new Date().toISOString().split('T')[0];
+  telemetriaSensorGroups: TelemetryGroup[] = [];
 
   // --- Mock Data para Historial ---
   historialFacturasMock = [
@@ -487,6 +543,15 @@ export class HomePage implements OnInit {
     });
   }
 
+  hasMedicionAccess(): boolean {
+    const roles = this.authService.getUserRoles();
+    if (roles.length === 0) return true; // dev fallback
+    return roles.some(r => {
+      const lower = r.toLowerCase();
+      return lower.includes('medicion') || lower.includes('telemetria') || lower.includes('administrar sedes') || lower.includes('administrar_sedes');
+    });
+  }
+
   ionViewWillEnter() {
     this.resetState();
 
@@ -541,6 +606,15 @@ export class HomePage implements OnInit {
     this.pendingPaymentAlarms = [];
     this.missingInvoiceAlarms = [];
     this.facturasRawItems = [];
+    this.telemetriaMensualItems = [];
+    this.telemetriaDiariaItems = [];
+    this.telemetriaDiariaItemsCompare = [];
+    this.telemetriaHorariaItems = [];
+    this.telemetriaHorariaItemsCompare = [];
+    this.telemetriaSensorGroups = [];
+    this.availableSedes = [];
+    this.selectedSede = 'todas';
+    this.telemetriaError = '';
   }
 
   /** Cambia el período y recarga datos */
@@ -560,12 +634,15 @@ export class HomePage implements OnInit {
     this.dashboardService.getEstadosContratos().subscribe({
       next: (items) => {
         // Ordenar por sede (headquarters_name) alfabéticamente
-        this.estadosContratos = items.sort((a, b) => {
+        const sorted = items.sort((a, b) => {
           const nameA = (a.headquarters_name || '').toLowerCase();
           const nameB = (b.headquarters_name || '').toLowerCase();
           return nameA.localeCompare(nameB);
         });
+        this.rawEstadosContratos = sorted;
         this.isLoadingContratos = false;
+        this.extractCompanies();
+        this.applyCompanyFilter();
       },
       error: () => { this.isLoadingContratos = false; }
     });
@@ -576,7 +653,7 @@ export class HomePage implements OnInit {
    * Alarma si payment_status === 'Vencida' o si es 'Pendiente' y faltan ≤ 5 días para due_date.
    */
   private loadPendingPaymentAlarms() {
-    this.dashboardService.getDescargaFacturasEstados().subscribe({
+    this.dashboardService.getFacturasRecibidas().subscribe({
       next: (items: DescargaFacturaEstadoItem[]) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -608,11 +685,13 @@ export class HomePage implements OnInit {
         }
 
         // Ordenar: primero los vencidos (daysLeft negativo), luego por urgencia
-        this.pendingPaymentAlarms = alarms.sort((a, b) => a.daysLeft - b.daysLeft);
-        console.log(`💳 Alarmas de pago (descarga_facturas_estados): ${alarms.length}`, alarms);
+        const sortedAlarms = alarms.sort((a, b) => a.daysLeft - b.daysLeft);
+        this.rawPendingPaymentAlarms = sortedAlarms;
+        this.applyCompanyFilter();
+        console.log(`💳 Alarmas de pago (facturas_recibidas): ${sortedAlarms.length}`, sortedAlarms);
       },
       error: (err) => {
-        console.error('❌ Error al cargar descarga_facturas_estados:', err);
+        console.error('❌ Error al cargar facturas_recibidas:', err);
       }
     });
   }
@@ -621,15 +700,18 @@ export class HomePage implements OnInit {
     this.isLoadingFacturas = true;
     this.facturasError = '';
 
-    // Cargar dashboard del período seleccionado
-    this.dashboardService.getFacturasDashboard(this.selectedPeriod).subscribe({
-      next: (dashboardData) => {
-        console.log(`📊 Facturas [${this.selectedPeriod}]:`, dashboardData);
+    // Cargar facturas crudas del período seleccionado
+    this.dashboardService.getRawFacturas(this.selectedPeriod).subscribe({
+      next: (data) => {
+        console.log(`📊 Facturas Crudas [${this.selectedPeriod}]:`, data);
+        this.rawFacturasCurrent = data.current || [];
+        this.rawFacturasCompare = data.compare || [];
         this.isLoadingFacturas = false;
-        this.facturasData = dashboardData;
+        this.extractCompanies();
+        this.applyCompanyFilter();
       },
       error: (err) => {
-        console.error('❌ Error al cargar facturas:', err);
+        console.error('❌ Error al cargar facturas crudas:', err);
         this.isLoadingFacturas = false;
         if (err.status === 401 || err.status === 403) {
           this.facturasError = 'Sesión expirada. Verifica el token de API.';
@@ -648,7 +730,7 @@ export class HomePage implements OnInit {
    * Solo alarma si days_overdue > 0 (ya pasó la fecha esperada de la factura).
    */
   private loadMissingInvoiceAlarms() {
-    this.dashboardService.getContratosSinFacturasCompletas().subscribe({
+    this.dashboardService.getReporteFacturasPorRecibir().subscribe({
       next: (items: ContratoSinFacturaCompletaItem[]) => {
         const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                             'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -667,13 +749,711 @@ export class HomePage implements OnInit {
             };
           });
 
-        this.missingInvoiceAlarms = alarms;
-        console.log(`🔔 Facturas faltantes (contratos_sin_facturas_completas): ${alarms.length}`, alarms);
+        this.rawMissingInvoiceAlarms = alarms;
+        this.applyCompanyFilter();
+        console.log(`🔔 Facturas faltantes (reporte_facturas_por_recibir): ${alarms.length}`, alarms);
       },
       error: (err) => {
-        console.error('❌ Error al cargar contratos_sin_facturas_completas:', err);
+        console.error('❌ Error al cargar reporte_facturas_por_recibir:', err);
       }
     });
+  }
+
+  // --- Helpers Filtro Empresa ---
+  toggleCompanyDropdown() {
+    this.showCompanyDropdown = !this.showCompanyDropdown;
+  }
+
+  selectCompany(companyId: string) {
+    this.selectedCompanyId = companyId;
+    this.showCompanyDropdown = false;
+    this.applyCompanyFilter();
+  }
+
+  getSelectedCompanyLabel(): string {
+    if (this.selectedCompanyId === 'todos') {
+      return 'Todos';
+    }
+    const comp = this.availableCompanies.find(c => c.id === this.selectedCompanyId);
+    return comp ? comp.name : this.selectedCompanyId;
+  }
+
+  extractCompanies() {
+    const companyMap = new Map<string, string>();
+
+    // Extraer de facturas crudas actuales
+    if (this.rawFacturasCurrent) {
+      this.rawFacturasCurrent.forEach(item => {
+        if (item.customer_id && item.customer_name) {
+          companyMap.set(item.customer_id.trim(), item.customer_name.trim());
+        }
+      });
+    }
+
+    // Extraer de contratos
+    if (this.rawEstadosContratos) {
+      this.rawEstadosContratos.forEach(item => {
+        if (item.customer_id && item.customer_name) {
+          companyMap.set(item.customer_id.trim(), item.customer_name.trim());
+        }
+      });
+    }
+
+    const extracted = Array.from(companyMap.entries()).map(([id, name]) => ({ id, name }));
+    
+    if (JSON.stringify(extracted) !== JSON.stringify(this.availableCompanies)) {
+      this.availableCompanies = extracted;
+    }
+  }
+
+  applyCompanyFilter() {
+    const cid = this.selectedCompanyId;
+
+    // 1. Filtrar facturas (dashboard)
+    if (this.rawFacturasCurrent) {
+      const filteredCurrent = cid === 'todos'
+        ? this.rawFacturasCurrent
+        : this.rawFacturasCurrent.filter(i => i.customer_id === cid);
+
+      const filteredCompare = cid === 'todos'
+        ? this.rawFacturasCompare
+        : this.rawFacturasCompare.filter(i => i.customer_id === cid);
+
+      this.facturasData = this.dashboardService.buildDashboard(filteredCurrent, filteredCompare);
+    }
+
+    // 2. Filtrar contratos
+    if (this.rawEstadosContratos) {
+      this.estadosContratos = cid === 'todos'
+        ? [...this.rawEstadosContratos]
+        : this.rawEstadosContratos.filter(c => c.customer_id === cid);
+    }
+
+    // 3. Filtrar alarmas pendientes de pago
+    if (this.rawPendingPaymentAlarms) {
+      this.pendingPaymentAlarms = cid === 'todos'
+        ? [...this.rawPendingPaymentAlarms]
+        : this.rawPendingPaymentAlarms.filter(a => a.customerId === cid);
+    }
+
+    // 4. Filtrar alarmas de facturas faltantes
+    if (this.rawMissingInvoiceAlarms) {
+      this.missingInvoiceAlarms = cid === 'todos'
+        ? [...this.rawMissingInvoiceAlarms]
+        : this.rawMissingInvoiceAlarms.filter(a => a.customerId === cid);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Medición Inteligente — Telemetría de Sedes
+  // ═══════════════════════════════════════════════════════════════
+
+  toggleSedeDropdown() {
+    this.showSedeDropdown = !this.showSedeDropdown;
+  }
+
+  selectSede(sede: string) {
+    this.selectedSede = sede;
+    this.showSedeDropdown = false;
+    this.reagrupateTelemetry();
+  }
+
+  toggleTelemetryGroup(group: TelemetryGroup) {
+    group.isExpanded = !group.isExpanded;
+  }
+
+  getTelemetrySensorsCount(): number {
+    return this.telemetriaSensorGroups.reduce((acc, g) => acc + g.cards.length, 0);
+  }
+
+  private isSolarCard(variable: string, sensorName: string): boolean {
+    const v = (variable || '').toLowerCase();
+    const s = (sensorName || '').toLowerCase();
+    return v.includes('solar') || s.includes('solar') || v.includes('generac') || s.includes('generac');
+  }
+
+  /**
+   * Color del indicador de variación. Para la mayoría de variables (consumo, costo)
+   * subir es malo (rojo) y bajar es bueno (verde). Para Generación Solar es al revés:
+   * generar más es bueno (verde) y generar menos es malo (rojo).
+   */
+  getVariationColorClass(card: SensorCard): string {
+    if (card.variationPct === 0) return 'text-[#91A2B8]';
+    const subio = card.variationPct > 0;
+    const esBueno = this.isSolarCard(card.variable, card.sensorName) ? subio : !subio;
+    return esBueno ? 'text-[#29E490]' : 'text-red-400';
+  }
+
+  /**
+   * Para las tarjetas de "Total" (Consumos y Generación Solar), el valor a mostrar
+   * debe ser la SUMA de todos los registros del período (días del mes o horas del día),
+   * no el promedio. groupBySensorDiario/Horario calculan currentAvg como promedio
+   * (correcto para categorías "Promedio"); aquí lo sobreescribimos con la suma real.
+   */
+  private applyTotalSum(c: SensorCard) {
+    c.currentAvg = c.currentSum;
+    c.compareAvg = c.compareSum;
+    c.variationPct = Math.round((c.compareSum ? ((c.currentSum - c.compareSum) / c.compareSum) * 100 : 0) * 10) / 10;
+  }
+
+  // --- Modal "Ver Historial" (gráfica mensual) ---
+  historialModalCard: SensorCard | null = null;
+
+  openHistorialModal(card: SensorCard) {
+    this.historialModalCard = card;
+  }
+
+  closeHistorialModal() {
+    this.historialModalCard = null;
+  }
+
+  buildTelemetryGroups(cards: SensorCard[], periodType: 'mensual' | 'diario' | 'horario'): TelemetryGroup[] {
+    const consumosCards: SensorCard[] = [];
+    const solarCards: SensorCard[] = [];
+    const restMap = new Map<string, SensorCard[]>();
+
+    for (const card of cards) {
+      const v = (card.variable || '').toLowerCase();
+      const s = (card.sensorName || '').toLowerCase();
+
+      if (this.isSolarCard(v, s)) {
+        solarCards.push(card);
+      } else if (v.includes('consum') || s.includes('consum') || v.includes('energ') || s.includes('energ') || v.includes('kwh') || s.includes('kwh')) {
+        consumosCards.push(card);
+      } else {
+        const catName = card.variable || 'Otros';
+        if (!restMap.has(catName)) restMap.set(catName, []);
+        restMap.get(catName)!.push(card);
+      }
+    }
+
+    // Ordenar consumos: Consumo General primero, luego Consumos Aires, luego otros
+    consumosCards.sort((a, b) => {
+      const nameA = a.sensorName.toLowerCase();
+      const nameB = b.sensorName.toLowerCase();
+      const varA = a.variable.toLowerCase();
+      const varB = b.variable.toLowerCase();
+
+      const isGenA = nameA.includes('general') || varA.includes('general');
+      const isGenB = nameB.includes('general') || varB.includes('general');
+      const isAirA = nameA.includes('aires') || varA.includes('aires');
+      const isAirB = nameB.includes('aires') || varB.includes('aires');
+
+      if (isGenA && !isGenB) return -1;
+      if (!isGenA && isGenB) return 1;
+      if (isAirA && !isAirB) return -1;
+      if (!isAirA && isAirB) return 1;
+      return a.sensorName.localeCompare(b.sensorName);
+    });
+
+    const groups: TelemetryGroup[] = [];
+
+    // Agregar Grupo Consumos
+    if (consumosCards.length > 0) {
+      consumosCards.forEach(c => {
+        if (periodType === 'mensual') {
+          c.valueLabel = 'Consumo Total';
+        } else if (periodType === 'diario') {
+          c.valueLabel = 'Consumo Total Diario';
+        } else {
+          c.valueLabel = 'Consumo Total Horario';
+        }
+        this.applyTotalSum(c);
+      });
+      groups.push({
+        name: 'Consumos',
+        icon: 'electric_meter',
+        isExpanded: true,
+        cards: consumosCards
+      });
+    }
+
+    // Agregar Grupo Generación Solar
+    if (solarCards.length > 0) {
+      solarCards.forEach(c => {
+        if (periodType === 'mensual') {
+          c.valueLabel = 'Generación Total';
+        } else if (periodType === 'diario') {
+          c.valueLabel = 'Generación Total Diaria';
+        } else {
+          c.valueLabel = 'Generación Total Horaria';
+        }
+        this.applyTotalSum(c);
+      });
+      groups.push({
+        name: 'Generación Solar',
+        icon: 'solar_power',
+        isExpanded: false,
+        cards: solarCards
+      });
+    }
+
+    // Agregar otros grupos
+    Array.from(restMap.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([catName, catCards]) => {
+      catCards.forEach(c => {
+        if (periodType === 'mensual') {
+          c.valueLabel = 'Promedio mensual';
+        } else if (periodType === 'diario') {
+          c.valueLabel = 'Promedio diario';
+        } else {
+          c.valueLabel = 'Promedio horario';
+        }
+      });
+      groups.push({
+        name: catName,
+        icon: this.getVariableIcon(catName),
+        isExpanded: false,
+        cards: catCards
+      });
+    });
+
+    return groups;
+  }
+
+  reagrupateTelemetry() {
+    if (this.activeTab === 'mensual') {
+      const cards = this.groupBySensorMensual(this.filterBySede(this.telemetriaMensualItems));
+      this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
+    } else if (this.activeTab === 'diario') {
+      const cards = this.groupBySensorDiario(
+        this.filterBySede(this.telemetriaDiariaItems),
+        this.filterBySede(this.telemetriaDiariaItemsCompare)
+      );
+      this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'diario');
+    } else if (this.activeTab === 'horario') {
+      const cards = this.groupBySensorHorario(
+        this.filterBySedeHoraria(this.telemetriaHorariaItems),
+        this.filterBySedeHoraria(this.telemetriaHorariaItemsCompare)
+      );
+      this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'horario');
+    }
+  }
+
+  getSelectedSedeLabel(): string {
+    return this.selectedSede === 'todas' ? 'Todas las Sedes' : this.selectedSede;
+  }
+
+  loadTelemetriaMensual() {
+    this.isLoadingTelemetria = true;
+    this.telemetriaError = '';
+    this.dashboardService.getReporteTelemetriaMensual().subscribe({
+      next: (items) => {
+        console.log('📡 Telemetría mensual:', items.length, 'registros');
+        this.telemetriaMensualItems = items;
+        this.isLoadingTelemetria = false;
+        this.extractSedes(items);
+        const cards = this.groupBySensorMensual(this.filterBySede(items));
+        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
+      },
+      error: (err) => {
+        console.error('❌ Error telemetría mensual:', err);
+        this.isLoadingTelemetria = false;
+        this.telemetriaError = 'No se pudieron cargar los datos de telemetría.';
+      }
+    });
+  }
+
+  loadTelemetriaDiaria() {
+    this.isLoadingTelemetria = true;
+    this.telemetriaError = '';
+    const { year, month } = this.selectedTelemetriaMonth;
+
+    // Calcular mes anterior
+    let compareYear = year;
+    let compareMonth = month - 1;
+    if (compareMonth < 1) {
+      compareMonth = 12;
+      compareYear--;
+    }
+
+    forkJoin({
+      current: this.dashboardService.getReporteTelemetriaDiaria(year, month),
+      compare: this.dashboardService.getReporteTelemetriaDiaria(compareYear, compareMonth)
+    }).subscribe({
+      next: (res) => {
+        console.log(`📡 Telemetría diaria actual [${year}-${month}]:`, res.current.length, 'registros');
+        console.log(`📡 Telemetría diaria anterior [${compareYear}-${compareMonth}]:`, res.compare.length, 'registros');
+        this.telemetriaDiariaItems = res.current;
+        this.telemetriaDiariaItemsCompare = res.compare;
+        this.isLoadingTelemetria = false;
+        if (this.availableSedes.length === 0) {
+          // Extraer sedes uniendo ambas listas
+          this.extractSedes([...res.current, ...res.compare]);
+        }
+        const cards = this.groupBySensorDiario(
+          this.filterBySede(res.current),
+          this.filterBySede(res.compare)
+        );
+        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'diario');
+      },
+      error: (err) => {
+        console.error('❌ Error telemetría diaria:', err);
+        this.isLoadingTelemetria = false;
+        this.telemetriaError = 'No se pudieron cargar los datos diarios.';
+      }
+    });
+  }
+
+  loadTelemetriaHoraria() {
+    this.isLoadingTelemetria = true;
+    this.telemetriaError = '';
+    const currentDate = this.selectedTelemetriaDate;
+
+    // Calcular día anterior
+    const d = new Date(currentDate + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    const prevDate = d.toISOString().split('T')[0];
+
+    forkJoin({
+      current: this.dashboardService.getReporteTelemetriaHoraria(currentDate),
+      compare: this.dashboardService.getReporteTelemetriaHoraria(prevDate)
+    }).subscribe({
+      next: (res) => {
+        console.log(`📡 Telemetría horaria actual [${currentDate}]:`, res.current.length, 'registros');
+        console.log(`📡 Telemetría horaria anterior [${prevDate}]:`, res.compare.length, 'registros');
+        this.telemetriaHorariaItems = res.current;
+        this.telemetriaHorariaItemsCompare = res.compare;
+        this.isLoadingTelemetria = false;
+        if (this.availableSedes.length === 0) {
+          this.extractSedesHoraria([...res.current, ...res.compare]);
+        }
+        const cards = this.groupBySensorHorario(
+          this.filterBySedeHoraria(res.current),
+          this.filterBySedeHoraria(res.compare)
+        );
+        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'horario');
+      },
+      error: (err) => {
+        console.error('❌ Error telemetría horaria:', err);
+        this.isLoadingTelemetria = false;
+        this.telemetriaError = 'No se pudieron cargar los datos horarios.';
+      }
+    });
+  }
+
+  extractSedes(items: TelemetriaMensualItem[]) {
+    const sedesSet = new Set(items.map(i => i.headquarters_name).filter(s => !!s));
+    this.availableSedes = Array.from(sedesSet).sort();
+  }
+
+  extractSedesHoraria(items: TelemetriaHorariaItem[]) {
+    const sedesSet = new Set(items.map(i => i.headquarters_name).filter(s => !!s));
+    this.availableSedes = Array.from(sedesSet).sort();
+  }
+
+  filterBySede(items: TelemetriaMensualItem[]): TelemetriaMensualItem[] {
+    if (this.selectedSede === 'todas') return items;
+    return items.filter(i => i.headquarters_name === this.selectedSede);
+  }
+
+  filterBySedeHoraria(items: TelemetriaHorariaItem[]): TelemetriaHorariaItem[] {
+    if (this.selectedSede === 'todas') return items;
+    return items.filter(i => i.headquarters_name === this.selectedSede);
+  }
+
+  private getVariableIcon(variable: string): string {
+    const v = (variable || '').toLowerCase();
+    if (v.includes('temp')) return 'thermostat';
+    if (v.includes('humed')) return 'humidity_percentage';
+    if (v.includes('volt') || v.includes('tensi')) return 'bolt';
+    if (v.includes('corri') || v.includes('amper')) return 'electric_meter';
+    if (v.includes('potenc') || v.includes('power')) return 'power';
+    if (v.includes('energ') || v.includes('kwh')) return 'electric_bolt';
+    if (v.includes('frecuen')) return 'waves';
+    if (v.includes('presion') || v.includes('pressure')) return 'compress';
+    if (v.includes('flujo') || v.includes('caudal') || v.includes('flow')) return 'water_drop';
+    return 'sensors';
+  }
+
+  groupBySensorMensual(items: TelemetriaMensualItem[]): SensorCard[] {
+    const sensorMap = new Map<string, TelemetriaMensualItem[]>();
+    for (const item of items) {
+      const key = item.sensor_name;
+      if (!sensorMap.has(key)) sensorMap.set(key, []);
+      sensorMap.get(key)!.push(item);
+    }
+
+    return Array.from(sensorMap.entries()).map(([sensorName, records]) => {
+      // Ordenar por fecha cronológica (yyyy-mm-dd)
+      records.sort((a, b) => a.date_record.localeCompare(b.date_record));
+
+      const values = records.map(r => r.value).filter(v => v !== null && v !== undefined);
+      const currentRecord = records[records.length - 1];
+      const compareRecord = records[records.length - 2];
+
+      const currentAvg = currentRecord ? currentRecord.value : 0;
+      const compareAvg = compareRecord ? compareRecord.value : 0;
+      const currentMax = values.length > 0 ? Math.max(...values) : 0;
+      const currentMin = values.length > 0 ? Math.min(...values) : 0;
+
+      const variationPct = compareAvg ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
+      const variationLabel = compareRecord ? 'vs mes anterior' : 'sin datos';
+
+      const unit = currentRecord?.unit || '';
+      const variable = currentRecord?.variable || '';
+      const headquarters = currentRecord?.headquarters_name || '';
+
+      // Trazado de línea para el histórico completo
+      let currentTrendPath = '';
+      let currentTrendAreaPath = '';
+      if (records.length > 1) {
+        const globalMin = Math.min(...values);
+        const globalMax = Math.max(...values);
+        const range = globalMax - globalMin || 1;
+        const step = 100 / (records.length - 1);
+        currentTrendPath = records.map((r, i) => {
+          const normalizedY = 10 + ((r.value - globalMin) / range) * 80;
+          return `${i === 0 ? 'M' : 'L'}${i * step},${100 - normalizedY}`;
+        }).join(' ');
+        currentTrendAreaPath = currentTrendPath + ` L100,100 L0,100 Z`;
+      } else if (records.length === 1) {
+        currentTrendPath = `M0,50 L100,50`;
+        currentTrendAreaPath = `M0,50 L100,50 L100,100 L0,100 Z`;
+      }
+
+      return {
+        sensorName,
+        variable,
+        unit,
+        icon: this.getVariableIcon(variable),
+        headquarters,
+        currentAvg: Math.round(currentAvg * 100) / 100,
+        currentMax: Math.round(currentMax * 100) / 100,
+        currentMin: Math.round(currentMin * 100) / 100,
+        compareAvg: Math.round(compareAvg * 100) / 100,
+        currentSum: Math.round(currentAvg * 100) / 100,
+        compareSum: Math.round(compareAvg * 100) / 100,
+        variationPct: Math.round(variationPct * 10) / 10,
+        variationLabel,
+        currentTrendPath,
+        currentTrendAreaPath,
+        compareTrendPath: '',
+        compareTrendAreaPath: ''
+      };
+    });
+  }
+
+  groupBySensorDiario(currentItems: TelemetriaMensualItem[], compareItems: TelemetriaMensualItem[]): SensorCard[] {
+    const currentMap = new Map<string, TelemetriaMensualItem[]>();
+    for (const item of currentItems) {
+      if (!currentMap.has(item.sensor_name)) currentMap.set(item.sensor_name, []);
+      currentMap.get(item.sensor_name)!.push(item);
+    }
+
+    const compareMap = new Map<string, TelemetriaMensualItem[]>();
+    for (const item of compareItems) {
+      if (!compareMap.has(item.sensor_name)) compareMap.set(item.sensor_name, []);
+      compareMap.get(item.sensor_name)!.push(item);
+    }
+
+    const allSensors = Array.from(new Set([...currentMap.keys(), ...compareMap.keys()]));
+
+    return allSensors.map(sensorName => {
+      const currentRecords = currentMap.get(sensorName) || [];
+      const compareRecords = compareMap.get(sensorName) || [];
+
+      const currentVals = currentRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
+      const compareVals = compareRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
+
+      const currentSum = currentVals.reduce((s, v) => s + v, 0);
+      const compareSum = compareVals.reduce((s, v) => s + v, 0);
+      const currentAvg = currentVals.length > 0 ? currentSum / currentVals.length : 0;
+      const compareAvg = compareVals.length > 0 ? compareSum / compareVals.length : 0;
+
+      const allVals = [...currentVals, ...compareVals];
+      const currentMax = currentVals.length > 0 ? Math.max(...currentVals) : 0;
+      const currentMin = currentVals.length > 0 ? Math.min(...currentVals) : 0;
+
+      const globalMax = allVals.length > 0 ? Math.max(...allVals) : 1;
+      const globalMin = allVals.length > 0 ? Math.min(...allVals) : 0;
+      const range = globalMax - globalMin || 1;
+
+      const variationPct = compareAvg ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
+      const firstRecord = currentRecords[0] || compareRecords[0];
+      const unit = firstRecord?.unit || '';
+      const variable = firstRecord?.variable || '';
+      const headquarters = firstRecord?.headquarters_name || '';
+
+      // Trazados SVG por día del mes (1 a 31)
+      const buildDailyPath = (records: TelemetriaMensualItem[]) => {
+        if (records.length === 0) return { path: '', area: '' };
+        // Mapear registros a días del mes y ordenar
+        const dayMap = new Map<number, number>();
+        records.forEach(r => {
+          const day = parseInt(r.date_record.split('-')[2], 10);
+          dayMap.set(day, r.value);
+        });
+
+        const sortedDays = Array.from(dayMap.keys()).sort((a, b) => a - b);
+        if (sortedDays.length === 0) return { path: '', area: '' };
+
+        const path = sortedDays.map((day, i) => {
+          const val = dayMap.get(day)!;
+          const x = ((day - 1) / 30) * 100; // Normalizado 1-31 a 0-100
+          const y = 10 + ((val - globalMin) / range) * 80;
+          return `${i === 0 ? 'M' : 'L'}${x},${100 - y}`;
+        }).join(' ');
+
+        const area = path + ` L${((sortedDays[sortedDays.length - 1] - 1) / 30) * 100},100 L${((sortedDays[0] - 1) / 30) * 100},100 Z`;
+        return { path, area };
+      };
+
+      const currPaths = buildDailyPath(currentRecords);
+      const compPaths = buildDailyPath(compareRecords);
+
+      return {
+        sensorName,
+        variable,
+        unit,
+        icon: this.getVariableIcon(variable),
+        headquarters,
+        currentAvg: Math.round(currentAvg * 100) / 100,
+        currentMax: Math.round(currentMax * 100) / 100,
+        currentMin: Math.round(currentMin * 100) / 100,
+        compareAvg: Math.round(compareAvg * 100) / 100,
+        currentSum: Math.round(currentSum * 100) / 100,
+        compareSum: Math.round(compareSum * 100) / 100,
+        variationPct: Math.round(variationPct * 10) / 10,
+        variationLabel: 'vs mes anterior',
+        currentTrendPath: currPaths.path,
+        currentTrendAreaPath: currPaths.area,
+        compareTrendPath: compPaths.path,
+        compareTrendAreaPath: compPaths.area
+      };
+    });
+  }
+
+  groupBySensorHorario(currentItems: TelemetriaHorariaItem[], compareItems: TelemetriaHorariaItem[]): SensorCard[] {
+    const currentMap = new Map<string, TelemetriaHorariaItem[]>();
+    for (const item of currentItems) {
+      if (!currentMap.has(item.sensor_name)) currentMap.set(item.sensor_name, []);
+      currentMap.get(item.sensor_name)!.push(item);
+    }
+
+    const compareMap = new Map<string, TelemetriaHorariaItem[]>();
+    for (const item of compareItems) {
+      if (!compareMap.has(item.sensor_name)) compareMap.set(item.sensor_name, []);
+      compareMap.get(item.sensor_name)!.push(item);
+    }
+
+    const allSensors = Array.from(new Set([...currentMap.keys(), ...compareMap.keys()]));
+
+    return allSensors.map(sensorName => {
+      const currentRecords = currentMap.get(sensorName) || [];
+      const compareRecords = compareMap.get(sensorName) || [];
+
+      const currentVals = currentRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
+      const compareVals = compareRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
+
+      const currentSum = currentVals.reduce((s, v) => s + v, 0);
+      const compareSum = compareVals.reduce((s, v) => s + v, 0);
+      const currentAvg = currentVals.length > 0 ? currentSum / currentVals.length : 0;
+      const compareAvg = compareVals.length > 0 ? compareSum / compareVals.length : 0;
+
+      const allVals = [...currentVals, ...compareVals];
+      const currentMax = currentVals.length > 0 ? Math.max(...currentVals) : 0;
+      const currentMin = currentVals.length > 0 ? Math.min(...currentVals) : 0;
+
+      const globalMax = allVals.length > 0 ? Math.max(...allVals) : 1;
+      const globalMin = allVals.length > 0 ? Math.min(...allVals) : 0;
+      const range = globalMax - globalMin || 1;
+
+      const variationPct = compareAvg ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
+      const firstRecord = currentRecords[0] || compareRecords[0];
+      const unit = firstRecord?.unit || '';
+      const variable = firstRecord?.variable || '';
+      const headquarters = firstRecord?.headquarters_name || '';
+
+      // Trazados SVG por hora (00:00 a 23:59) -> 0 a 23
+      const buildHourlyPath = (records: TelemetriaHorariaItem[]) => {
+        if (records.length === 0) return { path: '', area: '' };
+        // Promediar por hora para evitar duplicados en el mismo minuto/segundo si los hubiera
+        const hourMap = new Map<number, number[]>();
+        records.forEach(r => {
+          const hour = parseInt(r.datetime_record.substring(11, 13), 10);
+          if (!hourMap.has(hour)) hourMap.set(hour, []);
+          hourMap.get(hour)!.push(r.value);
+        });
+
+        const sortedHours = Array.from(hourMap.keys()).sort((a, b) => a - b);
+        if (sortedHours.length === 0) return { path: '', area: '' };
+
+        const path = sortedHours.map((hour, i) => {
+          const vals = hourMap.get(hour)!;
+          const val = vals.reduce((s, v) => s + v, 0) / vals.length;
+          const x = (hour / 23) * 100; // Normalizado 0-23 a 0-100
+          const y = 10 + ((val - globalMin) / range) * 80;
+          return `${i === 0 ? 'M' : 'L'}${x},${100 - y}`;
+        }).join(' ');
+
+        const area = path + ` L${(sortedHours[sortedHours.length - 1] / 23) * 100},100 L${(sortedHours[0] / 23) * 100},100 Z`;
+        return { path, area };
+      };
+
+      const currPaths = buildHourlyPath(currentRecords);
+      const compPaths = buildHourlyPath(compareRecords);
+
+      return {
+        sensorName,
+        variable,
+        unit,
+        icon: this.getVariableIcon(variable),
+        headquarters,
+        currentAvg: Math.round(currentAvg * 100) / 100,
+        currentMax: Math.round(currentMax * 100) / 100,
+        currentMin: Math.round(currentMin * 100) / 100,
+        compareAvg: Math.round(compareAvg * 100) / 100,
+        currentSum: Math.round(currentSum * 100) / 100,
+        compareSum: Math.round(compareSum * 100) / 100,
+        variationPct: Math.round(variationPct * 10) / 10,
+        variationLabel: 'vs ayer',
+        currentTrendPath: currPaths.path,
+        currentTrendAreaPath: currPaths.area,
+        compareTrendPath: compPaths.path,
+        compareTrendAreaPath: compPaths.area
+      };
+    });
+  }
+
+  prevTelemetriaMonth() {
+    let { year, month } = this.selectedTelemetriaMonth;
+    month--;
+    if (month < 1) { month = 12; year--; }
+    this.selectedTelemetriaMonth = { year, month };
+    this.loadTelemetriaDiaria();
+  }
+
+  nextTelemetriaMonth() {
+    let { year, month } = this.selectedTelemetriaMonth;
+    month++;
+    if (month > 12) { month = 1; year++; }
+    this.selectedTelemetriaMonth = { year, month };
+    this.loadTelemetriaDiaria();
+  }
+
+  getTelemetriaMonthLabel(): string {
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    return `${monthNames[this.selectedTelemetriaMonth.month - 1]} ${this.selectedTelemetriaMonth.year}`;
+  }
+
+  prevTelemetriaDate() {
+    const d = new Date(this.selectedTelemetriaDate);
+    d.setDate(d.getDate() - 1);
+    this.selectedTelemetriaDate = d.toISOString().split('T')[0];
+    this.loadTelemetriaHoraria();
+  }
+
+  nextTelemetriaDate() {
+    const d = new Date(this.selectedTelemetriaDate);
+    d.setDate(d.getDate() + 1);
+    this.selectedTelemetriaDate = d.toISOString().split('T')[0];
+    this.loadTelemetriaHoraria();
+  }
+
+  getTelemetriaDateLabel(): string {
+    const d = new Date(this.selectedTelemetriaDate + 'T12:00:00');
+    const options: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' };
+    return d.toLocaleDateString('es-CO', options);
   }
 
   /** Carga datos de infraestructura desde reporte_resumen_ejecutivo */
@@ -853,7 +1633,7 @@ export class HomePage implements OnInit {
     this.showNotificationsPanel = false;
   }
 
-  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas') {
+  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario') {
     this.activeTab = tab;
     if (tab === 'detalle') {
       this.detalleMetric = 'costo';
@@ -864,6 +1644,15 @@ export class HomePage implements OnInit {
     if (this.currentContext === 'Infraestructura' && (tab === 'equipos' || tab === 'reportes' || tab === 'alarmas' || tab === 'detalle')) {
       this.loadInfraData();
     }
+    if (tab === 'mensual') {
+      this.loadTelemetriaMensual();
+    }
+    if (tab === 'diario') {
+      this.loadTelemetriaDiaria();
+    }
+    if (tab === 'horario') {
+      this.loadTelemetriaHoraria();
+    }
   }
 
   // --- App Shell Context Methods ---
@@ -871,7 +1660,7 @@ export class HomePage implements OnInit {
     this.showContextDropdown = !this.showContextDropdown;
   }
 
-  selectContext(context: 'Gestión de Facturas' | 'Infraestructura') {
+  selectContext(context: 'Gestión de Facturas' | 'Infraestructura' | 'Medición Inteligente') {
     this.currentContext = context;
     this.showContextDropdown = false;
     
@@ -885,6 +1674,9 @@ export class HomePage implements OnInit {
       this.activeTab = 'equipos';
       this.collapseAllGroups();
       this.loadInfraData();
+    } else if (context === 'Medición Inteligente') {
+      this.activeTab = 'mensual';
+      this.loadTelemetriaMensual();
     }
   }
 
@@ -921,6 +1713,22 @@ export class HomePage implements OnInit {
       const profileButton = document.querySelector('[data-profile-button]');
       if (!profileButton?.contains(target)) {
         this.showProfileDropdown = false;
+      }
+    }
+
+    // Cerrar dropdown de empresa al hacer clic fuera
+    if (this.showCompanyDropdown) {
+      const companyContainer = document.querySelector('.company-selector-container');
+      if (companyContainer && !companyContainer.contains(target)) {
+        this.showCompanyDropdown = false;
+      }
+    }
+
+    // Cerrar dropdown de sede al hacer clic fuera
+    if (this.showSedeDropdown) {
+      const sedeContainer = document.querySelector('.sede-selector-container');
+      if (sedeContainer && !sedeContainer.contains(target)) {
+        this.showSedeDropdown = false;
       }
     }
   }

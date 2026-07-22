@@ -56,6 +56,21 @@
           </div>
           <span *ngIf="currentContext === 'Infraestructura'" class="material-symbols-outlined text-[16px] ml-auto">check_circle</span>
         </button>
+
+        <!-- Opción: Medición Inteligente -->
+        <button *ngIf="hasMedicionAccess()" (click)="selectContext('Medición Inteligente')"
+                class="w-full flex items-center gap-3 px-4 py-3.5 transition-all duration-200 hover:bg-white/5"
+                [ngClass]="currentContext === 'Medición Inteligente' ? 'text-[#29E490]' : 'text-[#FDFEF0]'">
+          <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+               [ngClass]="currentContext === 'Medición Inteligente' ? 'bg-[#29E490]/20' : 'bg-white/8'">
+            <span class="material-symbols-outlined text-[17px]">sensors</span>
+          </div>
+          <div class="text-left">
+            <p class="text-[12px] font-bold">Medición Inteligente</p>
+            <p class="text-[9px] text-[#91A2B8]">Consumo diario, hora y mes</p>
+          </div>
+          <span *ngIf="currentContext === 'Medición Inteligente'" class="material-symbols-outlined text-[16px] ml-auto">check_circle</span>
+        </button>
       </div>
     </div>
 
@@ -137,6 +152,56 @@
   </header>
 
   <main class="max-w-7xl mx-auto px-6 pb-36" style="padding-top: calc(env(safe-area-inset-top, 0px) + 80px);">
+    <!-- Selector de Empresa Global -->
+    <div *ngIf="currentContext === 'Gestión de Facturas' && availableCompanies.length > 0" class="company-selector-container relative mb-4">
+      <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+        <span class="material-symbols-outlined text-[16px] text-[#29E490]">corporate_fare</span>
+        <button (click)="toggleCompanyDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
+          Empresa: {{ getSelectedCompanyLabel() }}
+          <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showCompanyDropdown">expand_more</span>
+        </button>
+      </div>
+
+      <!-- Dropdown -->
+      <div *ngIf="showCompanyDropdown" class="absolute top-full left-0 mt-2 z-50 w-64 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
+        <button (click)="selectCompany('todos')"
+                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                [class.text-[#29E490]]="selectedCompanyId === 'todos'">
+          <span class="material-symbols-outlined text-base">all_inclusive</span> Todos
+        </button>
+        <button *ngFor="let c of availableCompanies" (click)="selectCompany(c.id)"
+                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                [class.text-[#29E490]]="selectedCompanyId === c.id">
+          <span class="material-symbols-outlined text-base">domain</span> {{ c.name }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Selector de Sede Global (Medición Inteligente) -->
+    <div *ngIf="currentContext === 'Medición Inteligente' && availableSedes.length > 0" class="sede-selector-container relative mb-4">
+      <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+        <span class="material-symbols-outlined text-[16px] text-[#29E490]">corporate_fare</span>
+        <button (click)="toggleSedeDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
+          Sede: {{ getSelectedSedeLabel() }}
+          <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showSedeDropdown">expand_more</span>
+        </button>
+      </div>
+
+      <!-- Dropdown -->
+      <div *ngIf="showSedeDropdown" class="absolute top-full left-0 mt-2 z-50 w-64 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
+        <button (click)="selectSede('todas')"
+                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                [class.text-[#29E490]]="selectedSede === 'todas'">
+          <span class="material-symbols-outlined text-base">all_inclusive</span> Todas las Sedes
+        </button>
+        <button *ngFor="let s of availableSedes" (click)="selectSede(s)"
+                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                [class.text-[#29E490]]="selectedSede === s">
+          <span class="material-symbols-outlined text-base">domain</span> {{ s }}
+        </button>
+      </div>
+    </div>
+
     <ng-container *ngIf="activeTab === 'resumen'">
       <div class="space-y-3 animate-fade-in pb-10">
 
@@ -1018,6 +1083,332 @@
       </div>
     </ng-container>
 
+    <!-- Pestaña: Mensual (Medición Inteligente) -->
+    <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'mensual'">
+      <div class="space-y-4 animate-fade-in pb-10">
+        <!-- Hero Card (Total Variables Monitoreadas) -->
+        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/10 p-5" style="background: linear-gradient(135deg, #014751 0%, #013440 60%, #022022 100%)">
+          <p class="text-[#91A2B8] text-[10px] uppercase tracking-[0.2em] font-bold mb-1">Medidores Monitoreados</p>
+          <div class="flex items-end justify-between">
+            <span class="text-4xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ getTelemetrySensorsCount() }}</span>
+            <span class="text-xs text-[#29E490] font-bold flex items-center gap-1">
+              <span class="material-symbols-outlined text-sm">sync</span> Activos
+            </span>
+          </div>
+        </div>
+
+        <!-- Mensaje de error/carga -->
+        <div *ngIf="isLoadingTelemetria" class="flex flex-col items-center justify-center py-16 gap-3">
+          <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
+          <p class="text-[#91A2B8] text-xs">Cargando telemetría mensual…</p>
+        </div>
+        <div *ngIf="!isLoadingTelemetria && telemetriaError" class="text-center py-8 text-red-400 text-xs">
+          {{ telemetriaError }}
+        </div>
+
+        <!-- Lista de Grupos de Medidores colapsables -->
+        <div *ngIf="!isLoadingTelemetria && !telemetriaError" class="space-y-4 pb-10">
+          <div *ngFor="let group of telemetriaSensorGroups" class="space-y-3">
+            <!-- Cabecera del Grupo colapsable -->
+            <div (click)="toggleTelemetryGroup(group)"
+                 class="flex justify-between items-center bg-[#014751]/50 border border-white/5 rounded-2xl px-5 py-3.5 cursor-pointer hover:bg-[#014751]/75 transition-all duration-200">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-[#29E490] text-[20px]">{{ group.icon }}</span>
+                <span class="text-xs font-bold text-[#FDFEF0] tracking-wider uppercase">{{ group.name }}</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/15 text-[#29E490] border border-[#29E490]/10">{{ group.cards.length }}</span>
+              </div>
+              <span class="material-symbols-outlined text-white/40 transition-transform duration-300 text-[20px]" [class.rotate-180]="group.isExpanded">expand_more</span>
+            </div>
+
+            <!-- Grilla de Tarjetas (Visible si está expandida) -->
+            <div *ngIf="group.isExpanded" class="grid grid-cols-1 md:grid-cols-2 gap-4 pl-1 animate-fade-in">
+              <div *ngFor="let card of group.cards" class="bg-[#014751]/40 border border-white/5 rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col gap-4">
+                <!-- Header de Tarjeta -->
+                <div class="flex justify-between items-start">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490]">
+                      <span class="material-symbols-outlined text-xl">{{ card.icon }}</span>
+                    </div>
+                    <div>
+                      <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">{{ card.sensorName }}</h3>
+                      <p class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-semibold">{{ card.variable }}</p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/10 text-[#29E490] border border-[#29E490]/20">{{ card.headquarters }}</span>
+                  </div>
+                </div>
+
+                <!-- Fila de Valor y Variación -->
+                <div class="flex justify-between items-end">
+                  <div class="flex flex-col">
+                    <span class="text-2xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ card.currentAvg }}{{ card.unit }}</span>
+                    <span class="text-[8px] text-[#91A2B8] uppercase tracking-wider font-semibold mt-1">{{ card.valueLabel }}</span>
+                  </div>
+                  <!-- Badge de variación -->
+                  <div class="flex items-center gap-1.5 bg-white/5 rounded-full px-2.5 py-1 border border-white/5">
+                    <span class="text-[10px] font-bold flex items-center gap-0.5"
+                          [ngClass]="getVariationColorClass(card)">
+                      <span class="material-symbols-outlined text-[13px] font-bold">{{ card.variationPct > 0 ? 'trending_up' : (card.variationPct < 0 ? 'trending_down' : 'trending_flat') }}</span>
+                      {{ card.variationPct > 0 ? '+' : '' }}{{ card.variationPct }}%
+                    </span>
+                    <span class="text-[8px] text-[#91A2B8] lowercase font-semibold">{{ card.variationLabel }}</span>
+                  </div>
+                </div>
+
+                <!-- Botón para ver la gráfica en un popup -->
+                <button (click)="openHistorialModal(card)"
+                        class="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#29E490] bg-[#29E490]/10 hover:bg-[#29E490]/20 border border-[#29E490]/20 rounded-xl py-2 transition-colors">
+                  <span class="material-symbols-outlined text-[15px]">show_chart</span>
+                  Ver Historial
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </ng-container>
+
+    <!-- Popup: Historial de gráfica (Medición Inteligente — Mensual, Diario y Horario) -->
+    <div *ngIf="historialModalCard"
+         class="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-in"
+         (click)="closeHistorialModal()">
+      <div class="w-full max-w-md bg-[#013440] border border-white/10 rounded-3xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.6)] relative"
+           (click)="$event.stopPropagation()">
+        <button (click)="closeHistorialModal()"
+                class="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors">
+          <span class="material-symbols-outlined text-lg">close</span>
+        </button>
+
+        <div class="flex items-center gap-2.5 mb-4 pr-10">
+          <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490]">
+            <span class="material-symbols-outlined text-xl">{{ historialModalCard.icon }}</span>
+          </div>
+          <div>
+            <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">{{ historialModalCard.sensorName }}</h3>
+            <p class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-semibold">{{ historialModalCard.variable }}</p>
+          </div>
+        </div>
+
+        <div class="h-40 relative w-full overflow-hidden rounded-2xl bg-black/15 border border-white/5">
+          <svg viewBox="0 0 100 100" class="w-full h-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient [id]="'greenGrad-modal-' + historialModalCard.sensorName" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#29E490" stop-opacity="0.25"/>
+                <stop offset="100%" stop-color="#29E490" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient [id]="'blueGrad-modal-' + historialModalCard.sensorName" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#00B4D8" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#00B4D8" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path *ngIf="historialModalCard.currentTrendAreaPath" [attr.d]="historialModalCard.currentTrendAreaPath" [attr.fill]="'url(#greenGrad-modal-' + historialModalCard.sensorName + ')'"/>
+            <path *ngIf="historialModalCard.compareTrendAreaPath" [attr.d]="historialModalCard.compareTrendAreaPath" [attr.fill]="'url(#blueGrad-modal-' + historialModalCard.sensorName + ')'"/>
+            <path *ngIf="historialModalCard.compareTrendPath" [attr.d]="historialModalCard.compareTrendPath" fill="none" stroke="#00B4D8" stroke-width="1.5" stroke-dasharray="3,3" stroke-opacity="0.7" stroke-linecap="round"/>
+            <path *ngIf="historialModalCard.currentTrendPath" [attr.d]="historialModalCard.currentTrendPath" fill="none" stroke="#29E490" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+          <span class="absolute top-2 left-3 text-[8px] font-bold text-white/50">Máx: {{ historialModalCard.currentMax }}{{ historialModalCard.unit }}</span>
+          <span class="absolute bottom-2 left-3 text-[8px] font-bold text-white/50">Mín: {{ historialModalCard.currentMin }}{{ historialModalCard.unit }}</span>
+        </div>
+
+        <!-- Leyenda (solo cuando hay curva de comparación: Diario/Horario) -->
+        <div *ngIf="historialModalCard.compareTrendPath" class="flex items-center gap-4 mt-2.5">
+          <span class="flex items-center gap-1.5 text-[8px] font-bold text-[#91A2B8] uppercase tracking-wider">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#29E490]"></span> Actual
+          </span>
+          <span class="flex items-center gap-1.5 text-[8px] font-bold text-[#91A2B8] uppercase tracking-wider">
+            <span class="w-2.5 h-2.5 rounded-full bg-[#00B4D8]"></span> Anterior
+          </span>
+        </div>
+
+        <div class="flex justify-between items-end mt-4">
+          <div class="flex flex-col">
+            <span class="text-2xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ historialModalCard.currentAvg }}{{ historialModalCard.unit }}</span>
+            <span class="text-[8px] text-[#91A2B8] uppercase tracking-wider font-semibold mt-1">{{ historialModalCard.valueLabel }}</span>
+          </div>
+          <div class="flex items-center gap-1.5 bg-white/5 rounded-full px-2.5 py-1 border border-white/5">
+            <span class="text-[10px] font-bold flex items-center gap-0.5" [ngClass]="getVariationColorClass(historialModalCard)">
+              <span class="material-symbols-outlined text-[13px] font-bold">{{ historialModalCard.variationPct > 0 ? 'trending_up' : (historialModalCard.variationPct < 0 ? 'trending_down' : 'trending_flat') }}</span>
+              {{ historialModalCard.variationPct > 0 ? '+' : '' }}{{ historialModalCard.variationPct }}%
+            </span>
+            <span class="text-[8px] text-[#91A2B8] lowercase font-semibold">{{ historialModalCard.variationLabel }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pestaña: Diario (Medición Inteligente) -->
+    <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'diario'">
+      <div class="space-y-4 animate-fade-in pb-10">
+        <!-- Selector de Mes (Paginador) -->
+        <div class="flex items-center justify-between bg-[#014751]/30 border border-white/5 rounded-full p-1.5 shadow-sm">
+          <button (click)="prevTelemetriaMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_left</span>
+          </button>
+          <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaMonthLabel() }}</span>
+          <button (click)="nextTelemetriaMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+          </button>
+        </div>
+
+        <!-- Mensaje de error/carga -->
+        <div *ngIf="isLoadingTelemetria" class="flex flex-col items-center justify-center py-16 gap-3">
+          <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
+          <p class="text-[#91A2B8] text-xs">Cargando telemetría diaria…</p>
+        </div>
+        <div *ngIf="!isLoadingTelemetria && telemetriaError" class="text-center py-8 text-red-400 text-xs">
+          {{ telemetriaError }}
+        </div>
+
+        <!-- Lista de Grupos de Medidores colapsables -->
+        <div *ngIf="!isLoadingTelemetria && !telemetriaError" class="space-y-4 pb-10">
+          <div *ngFor="let group of telemetriaSensorGroups" class="space-y-3">
+            <!-- Cabecera del Grupo colapsable -->
+            <div (click)="toggleTelemetryGroup(group)"
+                 class="flex justify-between items-center bg-[#014751]/50 border border-white/5 rounded-2xl px-5 py-3.5 cursor-pointer hover:bg-[#014751]/75 transition-all duration-200">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-[#29E490] text-[20px]">{{ group.icon }}</span>
+                <span class="text-xs font-bold text-[#FDFEF0] tracking-wider uppercase">{{ group.name }}</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/15 text-[#29E490] border border-[#29E490]/10">{{ group.cards.length }}</span>
+              </div>
+              <span class="material-symbols-outlined text-white/40 transition-transform duration-300 text-[20px]" [class.rotate-180]="group.isExpanded">expand_more</span>
+            </div>
+
+            <!-- Grilla de Tarjetas (Visible si está expandida) -->
+            <div *ngIf="group.isExpanded" class="grid grid-cols-1 md:grid-cols-2 gap-4 pl-1 animate-fade-in">
+              <div *ngFor="let card of group.cards" class="bg-[#014751]/40 border border-white/5 rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col gap-4">
+                <!-- Header de Tarjeta -->
+                <div class="flex justify-between items-start">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490]">
+                      <span class="material-symbols-outlined text-xl">{{ card.icon }}</span>
+                    </div>
+                    <div>
+                      <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">{{ card.sensorName }}</h3>
+                      <p class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-semibold">{{ card.variable }}</p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/10 text-[#29E490] border border-[#29E490]/20">{{ card.headquarters }}</span>
+                  </div>
+                </div>
+
+                <!-- Fila de Valor y Variación -->
+                <div class="flex justify-between items-end">
+                  <div class="flex flex-col">
+                    <span class="text-2xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ card.currentAvg }}{{ card.unit }}</span>
+                    <span class="text-[8px] text-[#91A2B8] uppercase tracking-wider font-semibold mt-1">{{ card.valueLabel }}</span>
+                  </div>
+                  <!-- Badge de variación -->
+                  <div class="flex items-center gap-1.5 bg-white/5 rounded-full px-2.5 py-1 border border-white/5">
+                    <span class="text-[10px] font-bold flex items-center gap-0.5"
+                          [ngClass]="getVariationColorClass(card)">
+                      <span class="material-symbols-outlined text-[13px] font-bold">{{ card.variationPct > 0 ? 'trending_up' : (card.variationPct < 0 ? 'trending_down' : 'trending_flat') }}</span>
+                      {{ card.variationPct > 0 ? '+' : '' }}{{ card.variationPct }}%
+                    </span>
+                    <span class="text-[8px] text-[#91A2B8] lowercase font-semibold">{{ card.variationLabel }}</span>
+                  </div>
+                </div>
+
+                <!-- Botón para ver la gráfica en un popup -->
+                <button (click)="openHistorialModal(card)"
+                        class="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#29E490] bg-[#29E490]/10 hover:bg-[#29E490]/20 border border-[#29E490]/20 rounded-xl py-2 transition-colors">
+                  <span class="material-symbols-outlined text-[15px]">show_chart</span>
+                  Ver Historial
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </ng-container>
+
+    <!-- Pestaña: Horario (Medición Inteligente) -->
+    <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'horario'">
+      <div class="space-y-4 animate-fade-in pb-10">
+        <!-- Selector de Día (Paginador) -->
+        <div class="flex items-center justify-between bg-[#014751]/30 border border-white/5 rounded-full p-1.5 shadow-sm">
+          <button (click)="prevTelemetriaDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_left</span>
+          </button>
+          <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaDateLabel() }}</span>
+          <button (click)="nextTelemetriaDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+          </button>
+        </div>
+
+        <!-- Mensaje de error/carga -->
+        <div *ngIf="isLoadingTelemetria" class="flex flex-col items-center justify-center py-16 gap-3">
+          <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
+          <p class="text-[#91A2B8] text-xs">Cargando telemetría horaria…</p>
+        </div>
+        <div *ngIf="!isLoadingTelemetria && telemetriaError" class="text-center py-8 text-red-400 text-xs">
+          {{ telemetriaError }}
+        </div>
+
+        <!-- Lista de Grupos de Medidores colapsables -->
+        <div *ngIf="!isLoadingTelemetria && !telemetriaError" class="space-y-4 pb-10">
+          <div *ngFor="let group of telemetriaSensorGroups" class="space-y-3">
+            <!-- Cabecera del Grupo colapsable -->
+            <div (click)="toggleTelemetryGroup(group)"
+                 class="flex justify-between items-center bg-[#014751]/50 border border-white/5 rounded-2xl px-5 py-3.5 cursor-pointer hover:bg-[#014751]/75 transition-all duration-200">
+              <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-[#29E490] text-[20px]">{{ group.icon }}</span>
+                <span class="text-xs font-bold text-[#FDFEF0] tracking-wider uppercase">{{ group.name }}</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/15 text-[#29E490] border border-[#29E490]/10">{{ group.cards.length }}</span>
+              </div>
+              <span class="material-symbols-outlined text-white/40 transition-transform duration-300 text-[20px]" [class.rotate-180]="group.isExpanded">expand_more</span>
+            </div>
+
+            <!-- Grilla de Tarjetas (Visible si está expandida) -->
+            <div *ngIf="group.isExpanded" class="grid grid-cols-1 md:grid-cols-2 gap-4 pl-1 animate-fade-in">
+              <div *ngFor="let card of group.cards" class="bg-[#014751]/40 border border-white/5 rounded-3xl p-5 shadow-lg relative overflow-hidden flex flex-col gap-4">
+                <!-- Header de Tarjeta -->
+                <div class="flex justify-between items-start">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490]">
+                      <span class="material-symbols-outlined text-xl">{{ card.icon }}</span>
+                    </div>
+                    <div>
+                      <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">{{ card.sensorName }}</h3>
+                      <p class="text-[9px] text-[#91A2B8] uppercase tracking-widest font-semibold">{{ card.variable }}</p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#29E490]/10 text-[#29E490] border border-[#29E490]/20">{{ card.headquarters }}</span>
+                  </div>
+                </div>
+
+                <!-- Fila de Valor y Variación -->
+                <div class="flex justify-between items-end">
+                  <div class="flex flex-col">
+                    <span class="text-2xl font-black text-[#FDFEF0] tracking-tighter leading-none">{{ card.currentAvg }}{{ card.unit }}</span>
+                    <span class="text-[8px] text-[#91A2B8] uppercase tracking-wider font-semibold mt-1">{{ card.valueLabel }}</span>
+                  </div>
+                  <!-- Badge de variación -->
+                  <div class="flex items-center gap-1.5 bg-white/5 rounded-full px-2.5 py-1 border border-white/5">
+                    <span class="text-[10px] font-bold flex items-center gap-0.5"
+                          [ngClass]="getVariationColorClass(card)">
+                      <span class="material-symbols-outlined text-[13px] font-bold">{{ card.variationPct > 0 ? 'trending_up' : (card.variationPct < 0 ? 'trending_down' : 'trending_flat') }}</span>
+                      {{ card.variationPct > 0 ? '+' : '' }}{{ card.variationPct }}%
+                    </span>
+                    <span class="text-[8px] text-[#91A2B8] lowercase font-semibold">{{ card.variationLabel }}</span>
+                  </div>
+                </div>
+
+                <!-- Botón para ver la gráfica en un popup -->
+                <button (click)="openHistorialModal(card)"
+                        class="flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#29E490] bg-[#29E490]/10 hover:bg-[#29E490]/20 border border-[#29E490]/20 rounded-xl py-2 transition-colors">
+                  <span class="material-symbols-outlined text-[15px]">show_chart</span>
+                  Ver Historial
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </ng-container>
+
   </main>
 
 
@@ -1062,6 +1453,28 @@
                 [ngClass]="activeTab === 'alarmas' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
           <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'alarmas'">notifications_active</span>
           <span>Alarmas</span>
+        </button>
+
+        <!-- PESTAÑAS: Medición Inteligente -->
+        <button *ngIf="currentContext === 'Medición Inteligente'" aria-label="Mensual" (click)="switchTab('mensual')"
+                class="flex-1 flex flex-col items-center justify-center text-[10px] font-bold transition-all duration-300 h-full rounded-full"
+                [ngClass]="activeTab === 'mensual' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
+          <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'mensual'">calendar_month</span>
+          <span>Mensual</span>
+        </button>
+
+        <button *ngIf="currentContext === 'Medición Inteligente'" aria-label="Diario" (click)="switchTab('diario')"
+                class="flex-1 flex flex-col items-center justify-center text-[10px] font-bold transition-all duration-300 h-full rounded-full"
+                [ngClass]="activeTab === 'diario' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
+          <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'diario'">today</span>
+          <span>Diario</span>
+        </button>
+
+        <button *ngIf="currentContext === 'Medición Inteligente'" aria-label="Horario" (click)="switchTab('horario')"
+                class="flex-1 flex flex-col items-center justify-center text-[10px] font-bold transition-all duration-300 h-full rounded-full"
+                [ngClass]="activeTab === 'horario' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
+          <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'horario'">schedule</span>
+          <span>Horario</span>
         </button>
     </nav>
 </ion-content>

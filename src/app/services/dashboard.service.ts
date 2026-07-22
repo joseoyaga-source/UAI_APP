@@ -128,6 +128,29 @@ export interface ResumenEjecutivoItem {
   [key: string]: any;
 }
 
+// --- Interfaces para telemetría de sedes (Medición Inteligente) ---
+export interface TelemetriaMensualItem {
+  date_record: string;
+  customer_id: string;
+  customer_name: string;
+  headquarters_name: string;
+  sensor_name: string;
+  unit: string;
+  variable: string;
+  value: number;
+}
+
+export interface TelemetriaHorariaItem {
+  datetime_record: string;
+  customer_id: string;
+  customer_name: string;
+  headquarters_name: string;
+  sensor_name: string;
+  unit: string;
+  variable: string;
+  value: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -138,18 +161,19 @@ export class DashboardService {
 
   /** Perfiles Accept-Profile por endpoint */
   private readonly acceptProfiles: Record<string, string> = {
-    reporte_historicos_consumos: 'etl_facturas_servicios_publicos',
-    reporte_datos_basicos_facturas: 'etl_facturas_servicios_publicos',
-    descarga_facturas_estados: 'etl_facturas_servicios_publicos',
-    contratos_sin_facturas_completas: 'etl_facturas_servicios_publicos',
+    reporte_historico_consumos: 'etl_facturas_servicios_publicos',
+    facturas_recibidas: 'etl_facturas_servicios_publicos',
+    reporte_facturas_por_recibir: 'etl_facturas_servicios_publicos',
     reporte_resumen_ejecutivo: 'monitoreo_equipos',
     reporte_mantenimiento: 'monitoreo_equipos',
     reporte_alarmas_abiertas: 'monitoreo_equipos',
     reporte_telemetria_actual: 'monitoreo_equipos',
-    reporte_telemetria_mensual: 'monitoreo_sedes'
+    reporte_telemetria_mensual: 'monitoreo_sedes',
+    reporte_telemetria_diaria: 'monitoreo_sedes',
+    reporte_telemetria_horaria: 'monitoreo_sedes'
   };
 
-  private getHeaders(endpoint: string = 'reporte_historicos_consumos'): HttpHeaders {
+  private getHeaders(endpoint: string = 'reporte_historico_consumos'): HttpHeaders {
     return new HttpHeaders({
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${environment.apiBearerToken}`,
@@ -253,7 +277,7 @@ export class DashboardService {
       `expedition_date=gte.${gte}`,
       `expedition_date=lte.${lte}`
     ].filter(p => p).join('&');
-    return `${this.apiBase}/reporte_historicos_consumos?${queryParams}`;
+    return `${this.apiBase}/reporte_historico_consumos?${queryParams}`;
   }
 
   /** Obtiene datos crudos de la API filtrados por período */
@@ -273,34 +297,42 @@ export class DashboardService {
       `expedition_date=gte.${inicio}`,
       `expedition_date=lte.${fin}`
     ].filter(p => p).join('&');
-    const url = `${this.apiBase}/reporte_historicos_consumos?${queryParams}`;
+    const url = `${this.apiBase}/reporte_historico_consumos?${queryParams}`;
     return this.http.get<FacturaItem[]>(url, { headers: this.getHeaders() });
   }
 
   /** Obtiene datos transformados para el dashboard según el período */
   getFacturasDashboard(periodo: PeriodoFilter = 'ano_actual'): Observable<FacturasDashboard> {
+    return this.getRawFacturas(periodo).pipe(
+      map(data => this.buildDashboard(data.current, data.compare))
+    );
+  }
+
+  getRawFacturas(periodo: PeriodoFilter = 'ano_actual'): Observable<{ current: FacturaItem[], compare: FacturaItem[] }> {
     return forkJoin([
       this.getReporteFacturas(periodo),
       this.getReporteComparacion(periodo)
     ]).pipe(
-      map(([currentItems, compItems]) => {
-        const dashboard = this.transformToDashboard(currentItems);
-
-        // Calcular % de cambio en gasto
-        const gastoActual = currentItems
-          .filter(i => i.item_type === 'Costo')
-          .reduce((sum, i) => sum + i.valor, 0);
-        const gastoComp = compItems
-          .filter(i => i.item_type === 'Costo')
-          .reduce((sum, i) => sum + i.valor, 0);
-
-        dashboard.gastoCambio = gastoComp > 0
-          ? Math.round(((gastoActual - gastoComp) / gastoComp) * 1000) / 10
-          : 0;
-
-        return dashboard;
-      })
+      map(([current, compare]) => ({ current, compare }))
     );
+  }
+
+  buildDashboard(currentItems: FacturaItem[], compItems: FacturaItem[]): FacturasDashboard {
+    const dashboard = this.transformToDashboard(currentItems);
+
+    // Calcular % de cambio en gasto
+    const gastoActual = currentItems
+      .filter(i => i.item_type === 'Costo')
+      .reduce((sum, i) => sum + i.valor, 0);
+    const gastoComp = compItems
+      .filter(i => i.item_type === 'Costo')
+      .reduce((sum, i) => sum + i.valor, 0);
+
+    dashboard.gastoCambio = gastoComp > 0
+      ? Math.round(((gastoActual - gastoComp) / gastoComp) * 1000) / 10
+      : 0;
+
+    return dashboard;
   }
 
   /** Obtiene datos del resumen ejecutivo (infraestructura) filtrados por cliente */
@@ -367,7 +399,7 @@ export class DashboardService {
   }
 
   // --- Transformaciones de Datos ---
-  private transformToDashboard(items: FacturaItem[]): FacturasDashboard {
+  public transformToDashboard(items: FacturaItem[]): FacturasDashboard {
     // Agrupar por sede (headquarters_name)
     const sedeMap = new Map<string, FacturaItem[]>();
     for (const item of items) {
@@ -540,12 +572,12 @@ export class DashboardService {
    */
   getDatosBasicosFacturas(): Observable<DatosBasicosFactura[]> {
     const filter = this.getCustomerFilter('facturas');
-    const url = `${this.apiBase}/reporte_datos_basicos_facturas` + (filter ? `?${filter}` : '');
+    const url = `${this.apiBase}/facturas_recibidas` + (filter ? `?${filter}` : '');
     return this.http.get<DatosBasicosFactura[]>(url, {
-      headers: this.getHeaders('reporte_datos_basicos_facturas')
+      headers: this.getHeaders('facturas_recibidas')
     }).pipe(
       catchError(err => {
-        console.error('Error en reporte_datos_basicos_facturas:', err);
+        console.error('Error en facturas_recibidas:', err);
         return of([]);
       })
     );
@@ -557,7 +589,7 @@ export class DashboardService {
     const filter = this.getCustomerFilter('facturas');
     const url = `${this.apiBase}/reporte_estados_contratos` + (filter ? `?${filter}` : '');
     return this.http.get<any[]>(url, {
-      headers: this.getHeaders('reporte_datos_basicos_facturas')
+      headers: this.getHeaders('reporte_historico_consumos')
     }).pipe(
       catchError(err => {
         console.error('Error en reporte_estados_contratos:', err);
@@ -568,16 +600,16 @@ export class DashboardService {
 
   /**
    * Obtiene el estado de pago de todas las facturas del cliente
-   * desde la vista descarga_facturas_estados.
+   * desde la vista facturas_recibidas.
    */
-  getDescargaFacturasEstados(): Observable<DescargaFacturaEstadoItem[]> {
+  getFacturasRecibidas(): Observable<DescargaFacturaEstadoItem[]> {
     const filter = this.getCustomerFilter('facturas');
-    const url = `${this.apiBase}/descarga_facturas_estados` + (filter ? `?${filter}` : '');
+    const url = `${this.apiBase}/facturas_recibidas` + (filter ? `?${filter}` : '');
     return this.http.get<DescargaFacturaEstadoItem[]>(url, {
-      headers: this.getHeaders('descarga_facturas_estados')
+      headers: this.getHeaders('facturas_recibidas')
     }).pipe(
       catchError(err => {
-        console.error('Error en descarga_facturas_estados:', err);
+        console.error('Error en facturas_recibidas:', err);
         return of([]);
       })
     );
@@ -585,16 +617,76 @@ export class DashboardService {
 
   /**
    * Obtiene los contratos que tienen meses de factura faltantes
-   * desde la vista contratos_sin_facturas_completas.
+   * desde la vista reporte_facturas_por_recibir.
    */
-  getContratosSinFacturasCompletas(): Observable<ContratoSinFacturaCompletaItem[]> {
+  getReporteFacturasPorRecibir(): Observable<ContratoSinFacturaCompletaItem[]> {
     const filter = this.getCustomerFilter('facturas');
-    const url = `${this.apiBase}/contratos_sin_facturas_completas` + (filter ? `?${filter}` : '');
+    const url = `${this.apiBase}/reporte_facturas_por_recibir` + (filter ? `?${filter}` : '');
     return this.http.get<ContratoSinFacturaCompletaItem[]>(url, {
-      headers: this.getHeaders('contratos_sin_facturas_completas')
+      headers: this.getHeaders('reporte_facturas_por_recibir')
     }).pipe(
       catchError(err => {
-        console.error('Error en contratos_sin_facturas_completas:', err);
+        console.error('Error en reporte_facturas_por_recibir:', err);
+        return of([]);
+      })
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Telemetría de Sedes — Medición Inteligente
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Telemetría mensual: un registro por sensor por mes */
+  getReporteTelemetriaMensual(): Observable<TelemetriaMensualItem[]> {
+    const filter = this.getCustomerFilter('infra');
+    const url = `${this.apiBase}/reporte_telemetria_mensual` + (filter ? `?${filter}` : '');
+    return this.http.get<TelemetriaMensualItem[]>(url, {
+      headers: this.getHeaders('reporte_telemetria_mensual')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en reporte_telemetria_mensual:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /** Telemetría diaria: registros por sensor por día del mes indicado */
+  getReporteTelemetriaDiaria(year: number, month: number): Observable<TelemetriaMensualItem[]> {
+    const filter = this.getCustomerFilter('infra');
+    const mm = String(month).padStart(2, '0');
+    const lastDay = new Date(year, month, 0).getDate();
+    const dateGte = `${year}-${mm}-01`;
+    const dateLte = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+    const params = [
+      filter,
+      `date_record=gte.${dateGte}`,
+      `date_record=lte.${dateLte}`
+    ].filter(p => p).join('&');
+    const url = `${this.apiBase}/reporte_telemetria_diaria?${params}`;
+    return this.http.get<TelemetriaMensualItem[]>(url, {
+      headers: this.getHeaders('reporte_telemetria_diaria')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en reporte_telemetria_diaria:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /** Telemetría horaria: registros por sensor para un día específico (00:00 – 23:59) */
+  getReporteTelemetriaHoraria(date: string): Observable<TelemetriaHorariaItem[]> {
+    const filter = this.getCustomerFilter('infra');
+    const params = [
+      filter,
+      `datetime_record=gte.${date}T00:00:00`,
+      `datetime_record=lte.${date}T23:59:59`
+    ].filter(p => p).join('&');
+    const url = `${this.apiBase}/reporte_telemetria_horaria?${params}`;
+    return this.http.get<TelemetriaHorariaItem[]>(url, {
+      headers: this.getHeaders('reporte_telemetria_horaria')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en reporte_telemetria_horaria:', err);
         return of([]);
       })
     );
