@@ -1086,6 +1086,17 @@
     <!-- Pestaña: Mensual (Medición Inteligente) -->
     <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'mensual'">
       <div class="space-y-4 animate-fade-in pb-10">
+        <!-- Selector de Mes (Paginador) -->
+        <div class="flex items-center justify-between bg-[#014751]/30 border border-white/5 rounded-full p-1.5 shadow-sm">
+          <button (click)="prevTelemetriaMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_left</span>
+          </button>
+          <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaMonthLabel() }}</span>
+          <button (click)="nextTelemetriaMonth()" [disabled]="isCurrentOrFutureMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors" [class.opacity-30]="isCurrentOrFutureMonth()" [class.cursor-not-allowed]="isCurrentOrFutureMonth()">
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+          </button>
+        </div>
+
         <!-- Hero Card (Total Variables Monitoreadas) -->
         <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/10 p-5" style="background: linear-gradient(135deg, #014751 0%, #013440 60%, #022022 100%)">
           <p class="text-[#91A2B8] text-[10px] uppercase tracking-[0.2em] font-bold mb-1">Medidores Monitoreados</p>
@@ -1240,17 +1251,6 @@
     <!-- Pestaña: Diario (Medición Inteligente) -->
     <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'diario'">
       <div class="space-y-4 animate-fade-in pb-10">
-        <!-- Selector de Mes (Paginador) -->
-        <div class="flex items-center justify-between bg-[#014751]/30 border border-white/5 rounded-full p-1.5 shadow-sm">
-          <button (click)="prevTelemetriaMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
-            <span class="material-symbols-outlined text-sm">chevron_left</span>
-          </button>
-          <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaMonthLabel() }}</span>
-          <button (click)="nextTelemetriaMonth()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
-            <span class="material-symbols-outlined text-sm">chevron_right</span>
-          </button>
-        </div>
-
         <!-- Mensaje de error/carga -->
         <div *ngIf="isLoadingTelemetria" class="flex flex-col items-center justify-center py-16 gap-3">
           <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
@@ -1332,7 +1332,7 @@
             <span class="material-symbols-outlined text-sm">chevron_left</span>
           </button>
           <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaDateLabel() }}</span>
-          <button (click)="nextTelemetriaDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+          <button (click)="nextTelemetriaDate()" [disabled]="isCurrentOrFutureDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors" [class.opacity-30]="isCurrentOrFutureDate()" [class.cursor-not-allowed]="isCurrentOrFutureDate()">
             <span class="material-symbols-outlined text-sm">chevron_right</span>
           </button>
         </div>

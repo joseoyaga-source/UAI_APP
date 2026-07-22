@@ -872,6 +872,25 @@ export class HomePage implements OnInit {
     return v.includes('solar') || s.includes('solar') || v.includes('generac') || s.includes('generac');
   }
 
+  private isOccupancyCard(variable: string, sensorName: string): boolean {
+    const v = (variable || '').toLowerCase();
+    const s = (sensorName || '').toLowerCase();
+    return v.includes('ocupa') || s.includes('ocupa');
+  }
+
+  /** Verifica si el mes seleccionado ya es el mes actual (o futuro) */
+  isCurrentOrFutureMonth(): boolean {
+    const now = new Date();
+    const { year, month } = this.selectedTelemetriaMonth;
+    return year > now.getFullYear() || (year === now.getFullYear() && month >= now.getMonth() + 1);
+  }
+
+  /** Verifica si la fecha seleccionada ya es hoy (o futura) */
+  isCurrentOrFutureDate(): boolean {
+    const today = new Date().toISOString().split('T')[0];
+    return this.selectedTelemetriaDate >= today;
+  }
+
   /**
    * Color del indicador de variación. Para la mayoría de variables (consumo, costo)
    * subir es malo (rojo) y bajar es bueno (verde). Para Generación Solar es al revés:
@@ -885,10 +904,11 @@ export class HomePage implements OnInit {
   }
 
   /**
-   * Para las tarjetas de "Total" (Consumos y Generación Solar), el valor a mostrar
-   * debe ser la SUMA de todos los registros del período (días del mes o horas del día),
-   * no el promedio. groupBySensorDiario/Horario calculan currentAvg como promedio
-   * (correcto para categorías "Promedio"); aquí lo sobreescribimos con la suma real.
+   * Para las tarjetas "Total Horario" (Consumos y Generación Solar en la vista Horario),
+   * el valor a mostrar debe ser la SUMA de todas las horas del día, no el promedio.
+   * groupBySensorHorario calcula currentAvg como promedio; aquí lo sobreescribimos
+   * con la suma real. (Diario no usa esto: ahí se muestra el valor del día vs el
+   * promedio del mes, y Mensual ya trae el total del mes en un único registro.)
    */
   private applyTotalSum(c: SensorCard) {
     c.currentAvg = c.currentSum;
@@ -954,11 +974,13 @@ export class HomePage implements OnInit {
         if (periodType === 'mensual') {
           c.valueLabel = 'Consumo Total';
         } else if (periodType === 'diario') {
-          c.valueLabel = 'Consumo Total Diario';
+          // El diario muestra el consumo DEL DÍA (no el total del mes, eso ya lo
+          // muestra la vista Mensual) comparado contra el promedio del mes.
+          c.valueLabel = 'Consumo del Día';
         } else {
           c.valueLabel = 'Consumo Total Horario';
+          this.applyTotalSum(c);
         }
-        this.applyTotalSum(c);
       });
       groups.push({
         name: 'Consumos',
@@ -974,11 +996,11 @@ export class HomePage implements OnInit {
         if (periodType === 'mensual') {
           c.valueLabel = 'Generación Total';
         } else if (periodType === 'diario') {
-          c.valueLabel = 'Generación Total Diaria';
+          c.valueLabel = 'Generación del Día';
         } else {
           c.valueLabel = 'Generación Total Horaria';
+          this.applyTotalSum(c);
         }
-        this.applyTotalSum(c);
       });
       groups.push({
         name: 'Generación Solar',
@@ -994,7 +1016,7 @@ export class HomePage implements OnInit {
         if (periodType === 'mensual') {
           c.valueLabel = 'Promedio mensual';
         } else if (periodType === 'diario') {
-          c.valueLabel = 'Promedio diario';
+          c.valueLabel = 'Valor del Día';
         } else {
           c.valueLabel = 'Promedio horario';
         }
@@ -1012,7 +1034,11 @@ export class HomePage implements OnInit {
 
   reagrupateTelemetry() {
     if (this.activeTab === 'mensual') {
-      const cards = this.groupBySensorMensual(this.filterBySede(this.telemetriaMensualItems));
+      const cards = this.groupBySensorMensual(
+        this.filterBySede(this.telemetriaMensualItems),
+        this.selectedTelemetriaMonth.year,
+        this.selectedTelemetriaMonth.month
+      );
       this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
     } else if (this.activeTab === 'diario') {
       const cards = this.groupBySensorDiario(
@@ -1033,6 +1059,21 @@ export class HomePage implements OnInit {
     return this.selectedSede === 'todas' ? 'Todas las Sedes' : this.selectedSede;
   }
 
+  /** Encuentra el año/mes más reciente con datos, para seleccionarlo por defecto en la vista mensual */
+  private findLatestTelemetriaMonth(items: TelemetriaMensualItem[]): { year: number; month: number } | null {
+    // Comparación por string (formato ISO yyyy-mm-dd): evita el bug de zona horaria
+    // de `new Date('yyyy-mm-dd')`, que en zonas UTC- interpreta la fecha como UTC
+    // medianoche y al pasar a hora local retrocede un día (julio → junio).
+    let latestStr: string | null = null;
+    for (const item of items) {
+      if (!item.date_record) continue;
+      if (!latestStr || item.date_record > latestStr) latestStr = item.date_record;
+    }
+    if (!latestStr) return null;
+    const [y, m] = latestStr.split('-');
+    return { year: parseInt(y, 10), month: parseInt(m, 10) };
+  }
+
   loadTelemetriaMensual() {
     this.isLoadingTelemetria = true;
     this.telemetriaError = '';
@@ -1040,10 +1081,16 @@ export class HomePage implements OnInit {
       next: (items) => {
         console.log('📡 Telemetría mensual:', items.length, 'registros');
         this.telemetriaMensualItems = items;
-        this.isLoadingTelemetria = false;
         this.extractSedes(items);
-        const cards = this.groupBySensorMensual(this.filterBySede(items));
-        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
+
+        // Seleccionar por defecto el mes más reciente con datos disponibles
+        const latest = this.findLatestTelemetriaMonth(items);
+        if (latest) {
+          this.selectedTelemetriaMonth = latest;
+        }
+
+        // Cargar datos diarios del mes seleccionado para calcular la suma de Ocupación
+        this.loadOccupancySumForMonth();
       },
       error: (err) => {
         console.error('❌ Error telemetría mensual:', err);
@@ -1053,10 +1100,65 @@ export class HomePage implements OnInit {
     });
   }
 
+  /**
+   * Carga los datos diarios del mes seleccionado para sumar los registros de
+   * Ocupación. Luego agrupa todo y muestra las tarjetas mensuales.
+   */
+  private loadOccupancySumForMonth() {
+    const { year, month } = this.selectedTelemetriaMonth;
+    this.dashboardService.getReporteTelemetriaDiaria(year, month).subscribe({
+      next: (dailyItems) => {
+        console.log(`📡 Telemetría diaria [${year}-${month}] para suma Ocupación:`, dailyItems.length, 'registros');
+        const cards = this.groupBySensorMensual(
+          this.filterBySede(this.telemetriaMensualItems),
+          year,
+          month
+        );
+
+        // Para cada tarjeta de Ocupación, sobreescribir el valor con la suma
+        // de los registros diarios del mes seleccionado
+        for (const card of cards) {
+          if (this.isOccupancyCard(card.variable, card.sensorName)) {
+            const sensorDailyRecords = dailyItems.filter(
+              r => r.sensor_name === card.sensorName
+            );
+            const sum = sensorDailyRecords.reduce((acc, r) => acc + (r.value ?? 0), 0);
+            card.currentAvg = Math.round(sum * 100) / 100;
+            card.currentSum = Math.round(sum * 100) / 100;
+            card.valueLabel = 'Total del Mes';
+            // Recalcular variación contra el mes anterior si existe
+            if (card.compareAvg) {
+              card.variationPct = Math.round(((sum - card.compareAvg) / card.compareAvg) * 100 * 10) / 10;
+            }
+          }
+        }
+
+        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
+        this.isLoadingTelemetria = false;
+      },
+      error: () => {
+        // Si falla la carga diaria, mostrar sin suma de ocupación
+        const cards = this.groupBySensorMensual(
+          this.filterBySede(this.telemetriaMensualItems),
+          year,
+          month
+        );
+        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'mensual');
+        this.isLoadingTelemetria = false;
+      }
+    });
+  }
+
   loadTelemetriaDiaria() {
     this.isLoadingTelemetria = true;
     this.telemetriaError = '';
-    const { year, month } = this.selectedTelemetriaMonth;
+
+    // El diario siempre compara "hoy" contra el promedio del mes en curso (o el
+    // promedio del mes anterior si el mes en curso aún no tiene datos). No depende
+    // de ninguna selección del usuario — ese filtro ahora vive en la vista Mensual.
+    const hoy = new Date();
+    const year = hoy.getFullYear();
+    const month = hoy.getMonth() + 1;
 
     // Calcular mes anterior
     let compareYear = year;
@@ -1165,7 +1267,7 @@ export class HomePage implements OnInit {
     return 'sensors';
   }
 
-  groupBySensorMensual(items: TelemetriaMensualItem[]): SensorCard[] {
+  groupBySensorMensual(items: TelemetriaMensualItem[], targetYear: number, targetMonth: number): SensorCard[] {
     const sensorMap = new Map<string, TelemetriaMensualItem[]>();
     for (const item of items) {
       const key = item.sensor_name;
@@ -1173,25 +1275,39 @@ export class HomePage implements OnInit {
       sensorMap.get(key)!.push(item);
     }
 
+    let compareYear = targetYear;
+    let compareMonth = targetMonth - 1;
+    if (compareMonth < 1) { compareMonth = 12; compareYear--; }
+
+    // Comparación por string (formato ISO yyyy-mm-dd): evita el bug de zona horaria
+    // de `new Date('yyyy-mm-dd')` (julio → junio en zonas UTC-).
+    const matchesMonth = (r: TelemetriaMensualItem, y: number, m: number) => {
+      if (!r.date_record) return false;
+      const [yy, mm] = r.date_record.split('-');
+      return parseInt(yy, 10) === y && parseInt(mm, 10) === m;
+    };
+
     return Array.from(sensorMap.entries()).map(([sensorName, records]) => {
       // Ordenar por fecha cronológica (yyyy-mm-dd)
       records.sort((a, b) => a.date_record.localeCompare(b.date_record));
 
       const values = records.map(r => r.value).filter(v => v !== null && v !== undefined);
-      const currentRecord = records[records.length - 1];
-      const compareRecord = records[records.length - 2];
+      // Registro del mes seleccionado y del mes anterior a ese (no "los últimos 2 registros")
+      const currentRecord = records.find(r => matchesMonth(r, targetYear, targetMonth));
+      const compareRecord = records.find(r => matchesMonth(r, compareYear, compareMonth));
+      const referenceRecord = currentRecord || compareRecord || records[records.length - 1];
 
       const currentAvg = currentRecord ? currentRecord.value : 0;
       const compareAvg = compareRecord ? compareRecord.value : 0;
       const currentMax = values.length > 0 ? Math.max(...values) : 0;
       const currentMin = values.length > 0 ? Math.min(...values) : 0;
 
-      const variationPct = compareAvg ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
-      const variationLabel = compareRecord ? 'vs mes anterior' : 'sin datos';
+      const variationPct = (compareRecord && compareAvg) ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
+      const variationLabel = !currentRecord ? 'sin datos este mes' : (compareRecord ? 'vs mes anterior' : 'sin datos mes anterior');
 
-      const unit = currentRecord?.unit || '';
-      const variable = currentRecord?.variable || '';
-      const headquarters = currentRecord?.headquarters_name || '';
+      const unit = referenceRecord?.unit || '';
+      const variable = referenceRecord?.variable || '';
+      const headquarters = referenceRecord?.headquarters_name || '';
 
       // Trazado de línea para el histórico completo
       let currentTrendPath = '';
@@ -1249,16 +1365,32 @@ export class HomePage implements OnInit {
     const allSensors = Array.from(new Set([...currentMap.keys(), ...compareMap.keys()]));
 
     return allSensors.map(sensorName => {
-      const currentRecords = currentMap.get(sensorName) || [];
-      const compareRecords = compareMap.get(sensorName) || [];
+      const currentRecords = (currentMap.get(sensorName) || []).slice().sort((a, b) => a.date_record.localeCompare(b.date_record));
+      const compareRecords = (compareMap.get(sensorName) || []).slice().sort((a, b) => a.date_record.localeCompare(b.date_record));
 
-      const currentVals = currentRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
-      const compareVals = compareRecords.map(r => r.value).filter(v => v !== null && v !== undefined);
+      const currentValidRecords = currentRecords.filter(r => r.value !== null && r.value !== undefined);
+      const compareValidRecords = compareRecords.filter(r => r.value !== null && r.value !== undefined);
+      const currentVals = currentValidRecords.map(r => r.value);
+      const compareVals = compareValidRecords.map(r => r.value);
 
       const currentSum = currentVals.reduce((s, v) => s + v, 0);
       const compareSum = compareVals.reduce((s, v) => s + v, 0);
-      const currentAvg = currentVals.length > 0 ? currentSum / currentVals.length : 0;
-      const compareAvg = compareVals.length > 0 ? compareSum / compareVals.length : 0;
+
+      // "Consumo del día": se filtra explícitamente por la fecha de hoy.
+      // Si no hay dato para hoy todavía, se muestra 0.
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todayRecord = currentValidRecords.find(r => r.date_record === todayStr);
+      const dayValue = todayRecord ? todayRecord.value : 0;
+
+      // Base de comparación: promedio del mes en curso; si aún no hay datos de este
+      // mes, se compara contra el promedio del mes anterior.
+      const hasMonthAvg = currentVals.length > 0;
+      const monthAvg = hasMonthAvg ? currentSum / currentVals.length : 0;
+      const prevMonthAvg = compareVals.length > 0 ? compareSum / compareVals.length : 0;
+      const compareBasis = hasMonthAvg ? monthAvg : prevMonthAvg;
+      const variationLabel = hasMonthAvg
+        ? 'vs promedio del mes'
+        : (compareVals.length > 0 ? 'vs promedio mes anterior' : 'sin datos');
 
       const allVals = [...currentVals, ...compareVals];
       const currentMax = currentVals.length > 0 ? Math.max(...currentVals) : 0;
@@ -1268,7 +1400,7 @@ export class HomePage implements OnInit {
       const globalMin = allVals.length > 0 ? Math.min(...allVals) : 0;
       const range = globalMax - globalMin || 1;
 
-      const variationPct = compareAvg ? ((currentAvg - compareAvg) / compareAvg) * 100 : 0;
+      const variationPct = compareBasis ? ((dayValue - compareBasis) / compareBasis) * 100 : 0;
       const firstRecord = currentRecords[0] || compareRecords[0];
       const unit = firstRecord?.unit || '';
       const variable = firstRecord?.variable || '';
@@ -1307,14 +1439,14 @@ export class HomePage implements OnInit {
         unit,
         icon: this.getVariableIcon(variable),
         headquarters,
-        currentAvg: Math.round(currentAvg * 100) / 100,
+        currentAvg: Math.round(dayValue * 100) / 100,
         currentMax: Math.round(currentMax * 100) / 100,
         currentMin: Math.round(currentMin * 100) / 100,
-        compareAvg: Math.round(compareAvg * 100) / 100,
+        compareAvg: Math.round(compareBasis * 100) / 100,
         currentSum: Math.round(currentSum * 100) / 100,
         compareSum: Math.round(compareSum * 100) / 100,
         variationPct: Math.round(variationPct * 10) / 10,
-        variationLabel: 'vs mes anterior',
+        variationLabel,
         currentTrendPath: currPaths.path,
         currentTrendAreaPath: currPaths.area,
         compareTrendPath: compPaths.path,
@@ -1420,15 +1552,20 @@ export class HomePage implements OnInit {
     month--;
     if (month < 1) { month = 12; year--; }
     this.selectedTelemetriaMonth = { year, month };
-    this.loadTelemetriaDiaria();
+    // Recargar suma de ocupación para el nuevo mes seleccionado
+    this.isLoadingTelemetria = true;
+    this.loadOccupancySumForMonth();
   }
 
   nextTelemetriaMonth() {
+    if (this.isCurrentOrFutureMonth()) return; // No avanzar más allá del mes actual
     let { year, month } = this.selectedTelemetriaMonth;
     month++;
     if (month > 12) { month = 1; year++; }
     this.selectedTelemetriaMonth = { year, month };
-    this.loadTelemetriaDiaria();
+    // Recargar suma de ocupación para el nuevo mes seleccionado
+    this.isLoadingTelemetria = true;
+    this.loadOccupancySumForMonth();
   }
 
   getTelemetriaMonthLabel(): string {
@@ -1444,6 +1581,7 @@ export class HomePage implements OnInit {
   }
 
   nextTelemetriaDate() {
+    if (this.isCurrentOrFutureDate()) return; // No avanzar más allá de hoy
     const d = new Date(this.selectedTelemetriaDate);
     d.setDate(d.getDate() + 1);
     this.selectedTelemetriaDate = d.toISOString().split('T')[0];
