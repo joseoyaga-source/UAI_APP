@@ -406,6 +406,8 @@ export class HomePage implements OnInit {
         };
       });
       return [...missingAlarms, ...pendingAlarms];
+    } else if (this.currentContext === 'Medición Inteligente') {
+      return this.getTelemetryAnomalyAlarms();
     } else {
       // Use enriched alarms if available, otherwise fall back to alarmasItems
       if (this.alarmasAbiertas.length > 0) {
@@ -437,6 +439,46 @@ export class HomePage implements OnInit {
         rawItem: a
       }));
     }
+  }
+
+  getTelemetryAnomalyAlarms(): { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] {
+    const alarms: { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] = [];
+
+    for (const group of this.telemetriaSensorGroups) {
+      for (const card of group.cards) {
+        const v = (card.variable || '').toLowerCase();
+        const s = (card.sensorName || '').toLowerCase();
+
+        const isTarget = v.includes('consum') || s.includes('consum') || v.includes('general') || s.includes('general') ||
+                         v.includes('aires') || s.includes('aires') || v.includes('solar') || s.includes('solar') ||
+                         v.includes('generac') || s.includes('generac');
+
+        if (!isTarget) continue;
+
+        const absPct = Math.abs(card.variationPct);
+        if (absPct >= 20) {
+          const isIncrease = card.variationPct > 0;
+          const icon = isIncrease ? '⚠️' : '⚡';
+          const type = absPct >= 30 ? 'alarm' : 'warning';
+          
+          const title = `${icon} Anomalía en ${card.sensorName}`;
+          const subtitle = `${card.headquarters || 'Sede'} • Variación: ${isIncrease ? '+' : ''}${card.variationPct}% ${card.variationLabel || ''}`;
+          const detail = `Medición actual: ${card.currentAvg}${card.unit} vs Anterior: ${card.compareAvg}${card.unit}. Se detectó un cambio anómalo de ${absPct}% (≥ 20%).`;
+
+          alarms.push({
+            title,
+            subtitle,
+            detail,
+            type,
+            serial: card.sensorName,
+            date: new Date().toISOString().split('T')[0],
+            rawItem: card
+          });
+        }
+      }
+    }
+
+    return alarms;
   }
 
   handleNotificationClick(notification: any) {
@@ -916,15 +958,42 @@ export class HomePage implements OnInit {
     c.variationPct = Math.round((c.compareSum ? ((c.currentSum - c.compareSum) / c.compareSum) * 100 : 0) * 10) / 10;
   }
 
-  // --- Modal "Ver Historial" (gráfica mensual) ---
+  // --- Modal "Ver Historial" (gráfica 24h + tendencia mensual) ---
   historialModalCard: SensorCard | null = null;
+  historialModalTab: 'horario' | 'mensual' = 'horario';
+  historialModalOrigin: 'mensual' | 'diario' = 'diario';
 
-  openHistorialModal(card: SensorCard) {
+  openHistorialModal(card: SensorCard, origin: 'mensual' | 'diario' = 'diario') {
     this.historialModalCard = card;
+    this.historialModalOrigin = origin;
+    if (origin === 'mensual') {
+      this.historialModalTab = 'mensual';
+    } else {
+      this.historialModalTab = 'horario';
+      if (this.telemetriaHorariaItems.length === 0) {
+        this.loadTelemetriaHoraria();
+      }
+    }
   }
 
   closeHistorialModal() {
     this.historialModalCard = null;
+  }
+
+  getHourlyModalCard(): SensorCard | null {
+    if (!this.historialModalCard) return null;
+    const hourlyCards = this.groupBySensorHorario(
+      this.filterBySedeHoraria(this.telemetriaHorariaItems),
+      this.filterBySedeHoraria(this.telemetriaHorariaItemsCompare)
+    );
+    const found = hourlyCards.find(c => c.sensorName === this.historialModalCard?.sensorName);
+    if (found && (this.isSolarCard(found.variable, found.sensorName) || found.variable.toLowerCase().includes('consum'))) {
+      this.applyTotalSum(found);
+      found.valueLabel = 'Total del Día';
+    } else if (found) {
+      found.valueLabel = 'Promedio Horario';
+    }
+    return found || null;
   }
 
   buildTelemetryGroups(cards: SensorCard[], periodType: 'mensual' | 'diario' | 'horario'): TelemetryGroup[] {
@@ -1309,20 +1378,30 @@ export class HomePage implements OnInit {
       const variable = referenceRecord?.variable || '';
       const headquarters = referenceRecord?.headquarters_name || '';
 
-      // Trazado de línea para el histórico completo
+      // Trazado de línea para el histórico de los últimos 6 meses hasta el mes seleccionado
+      const isUpToSelectedMonth = (r: TelemetriaMensualItem) => {
+        if (!r.date_record) return false;
+        const [yy, mm] = r.date_record.split('-');
+        const ry = parseInt(yy, 10);
+        const rm = parseInt(mm, 10);
+        return (ry < targetYear) || (ry === targetYear && rm <= targetMonth);
+      };
+      const last6Records = records.filter(isUpToSelectedMonth).slice(-6);
+      const last6Values = last6Records.map(r => r.value).filter(v => v !== null && v !== undefined);
+
       let currentTrendPath = '';
       let currentTrendAreaPath = '';
-      if (records.length > 1) {
-        const globalMin = Math.min(...values);
-        const globalMax = Math.max(...values);
+      if (last6Records.length > 1) {
+        const globalMin = Math.min(...last6Values);
+        const globalMax = Math.max(...last6Values);
         const range = globalMax - globalMin || 1;
-        const step = 100 / (records.length - 1);
-        currentTrendPath = records.map((r, i) => {
+        const step = 100 / (last6Records.length - 1);
+        currentTrendPath = last6Records.map((r, i) => {
           const normalizedY = 10 + ((r.value - globalMin) / range) * 80;
           return `${i === 0 ? 'M' : 'L'}${i * step},${100 - normalizedY}`;
         }).join(' ');
         currentTrendAreaPath = currentTrendPath + ` L100,100 L0,100 Z`;
-      } else if (records.length === 1) {
+      } else if (last6Records.length === 1) {
         currentTrendPath = `M0,50 L100,50`;
         currentTrendAreaPath = `M0,50 L100,50 L100,100 L0,100 Z`;
       }
