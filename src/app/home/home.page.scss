@@ -1091,4 +1091,58 @@ body.light .date-filter-inactive:hover {
   }
 }
 
+/* ═══════════════════════════════════════════
+   Gráfico Tarifa vs Consumo — puntos y animación
+   ═══════════════════════════════════════════ */
+.trend-dot {
+  position: absolute;
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  animation: trendDotPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+.trend-dot--consumo {
+  width: 7px; height: 7px;
+  background: #022022;
+  border: 2px solid #29E490;
+  box-shadow: 0 0 6px rgba(41, 228, 144, 0.55);
+}
+.trend-dot--tarifa {
+  width: 7px; height: 7px;
+  background: #022022;
+  border: 2px solid #F59E0B;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.55);
+}
+.trend-dot--consumo-active {
+  width: 13px; height: 13px;
+  background: #29E490;
+  border: 2px solid #eafff5;
+  box-shadow: 0 0 0 4px rgba(41, 228, 144, 0.18), 0 0 14px rgba(41, 228, 144, 0.85);
+  z-index: 3;
+}
+.trend-dot--tarifa-active {
+  width: 13px; height: 13px;
+  background: #F59E0B;
+  border: 2px solid #fff4de;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18), 0 0 14px rgba(245, 158, 11, 0.85);
+  z-index: 3;
+}
+@keyframes trendDotPop {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0); }
+  60%  { transform: translate(-50%, -50%) scale(1.25); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ═══════════════════════════════════════════
+   UAI Expert — ícono con pulso suave
+   ═══════════════════════════════════════════ */
+.uai-pulse {
+  animation: uaiPulse 2.4s ease-in-out infinite;
+}
+@keyframes uaiPulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50%      { transform: scale(1.12); opacity: 1; }
+}
+
 

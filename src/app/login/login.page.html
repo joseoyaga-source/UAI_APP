@@ -29,6 +29,14 @@
       </div>
 
       <div class="forgot-link-container">
+        @if (!biometricAvailable) {
+          <button type="button" class="btn-remember" (click)="toggleRememberMe()">
+            <span class="remember-box" [class.checked]="rememberMe">
+              <ion-icon name="checkmark-outline"></ion-icon>
+            </span>
+            <span>Recordar mis datos</span>
+          </button>
+        }
         <button class="btn-forgot" (click)="onForgotPassword()">¿Olvidaste tu contraseña?</button>
       </div>
     </div>

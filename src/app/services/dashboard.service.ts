@@ -86,7 +86,7 @@ export interface DescargaFacturaEstadoItem {
   billing_period: string;
   due_date: string;
   expedition_date: string;
-  payment_status: 'Vencida' | 'Pagada' | 'Pendiente';
+  payment_status: 'Vencida' | 'Pagada' | 'Por vencer';
   payment_date: string | null;
   days_overdue: number;
   city: string;
@@ -162,7 +162,7 @@ export class DashboardService {
   /** Perfiles Accept-Profile por endpoint */
   private readonly acceptProfiles: Record<string, string> = {
     reporte_historico_consumos: 'etl_facturas_servicios_publicos',
-    facturas_recibidas: 'etl_facturas_servicios_publicos',
+    reporte_facturas_recibidas: 'etl_facturas_servicios_publicos',
     reporte_facturas_por_recibir: 'etl_facturas_servicios_publicos',
     reporte_resumen_ejecutivo: 'monitoreo_equipos',
     reporte_mantenimiento: 'monitoreo_equipos',
@@ -572,12 +572,12 @@ export class DashboardService {
    */
   getDatosBasicosFacturas(): Observable<DatosBasicosFactura[]> {
     const filter = this.getCustomerFilter('facturas');
-    const url = `${this.apiBase}/facturas_recibidas` + (filter ? `?${filter}` : '');
+    const url = `${this.apiBase}/reporte_facturas_recibidas` + (filter ? `?${filter}` : '');
     return this.http.get<DatosBasicosFactura[]>(url, {
-      headers: this.getHeaders('facturas_recibidas')
+      headers: this.getHeaders('reporte_facturas_recibidas')
     }).pipe(
       catchError(err => {
-        console.error('Error en facturas_recibidas:', err);
+        console.error('Error en reporte_facturas_recibidas:', err);
         return of([]);
       })
     );
@@ -604,12 +604,12 @@ export class DashboardService {
    */
   getFacturasRecibidas(): Observable<DescargaFacturaEstadoItem[]> {
     const filter = this.getCustomerFilter('facturas');
-    const url = `${this.apiBase}/facturas_recibidas` + (filter ? `?${filter}` : '');
+    const url = `${this.apiBase}/reporte_facturas_recibidas` + (filter ? `?${filter}` : '');
     return this.http.get<DescargaFacturaEstadoItem[]>(url, {
-      headers: this.getHeaders('facturas_recibidas')
+      headers: this.getHeaders('reporte_facturas_recibidas')
     }).pipe(
       catchError(err => {
-        console.error('Error en facturas_recibidas:', err);
+        console.error('Error en reporte_facturas_recibidas:', err);
         return of([]);
       })
     );
@@ -673,13 +673,14 @@ export class DashboardService {
     );
   }
 
-  /** Telemetría horaria: registros por sensor para un día específico (00:00 – 23:59) */
+  /** Telemetría horaria: registros por sensor para un día específico (00:00 – 23:59) en hora LOCAL del usuario */
   getReporteTelemetriaHoraria(date: string): Observable<TelemetriaHorariaItem[]> {
     const filter = this.getCustomerFilter('infra');
+    const { utcStart, utcEnd } = DashboardService.getLocalDayUtcRange(date);
     const params = [
       filter,
-      `datetime_record=gte.${date}T00:00:00`,
-      `datetime_record=lte.${date}T23:59:59`
+      `datetime_record=gte.${utcStart}`,
+      `datetime_record=lte.${utcEnd}`
     ].filter(p => p).join('&');
     const url = `${this.apiBase}/reporte_telemetria_horaria?${params}`;
     return this.http.get<TelemetriaHorariaItem[]>(url, {
@@ -690,5 +691,35 @@ export class DashboardService {
         return of([]);
       })
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Utilidades de Zona Horaria
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Retorna la zona horaria IANA del dispositivo/navegador (e.g. 'America/Bogota') */
+  static getUserTimezone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }
+
+  /** Retorna la fecha actual en formato YYYY-MM-DD en hora local del usuario */
+  static getLocalDateString(d?: Date): string {
+    const now = d ?? new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  /**
+   * Dado un string de fecha 'YYYY-MM-DD', retorna los timestamps que cubren el inicio
+   * (00:00:00) y fin (23:59:59) del día, tal cual, SIN ajuste de zona horaria (UTC).
+   * Se usan directamente para consultar la API con la misma hora que ésta almacena.
+   */
+  static getLocalDayUtcRange(localDateStr: string): { utcStart: string; utcEnd: string } {
+    // Rango del día sin conversión de zona horaria: se envía la fecha/hora tal cual.
+    const utcStart = `${localDateStr}T00:00:00`;
+    const utcEnd = `${localDateStr}T23:59:59`;
+    return { utcStart, utcEnd };
   }
 }

@@ -101,7 +101,7 @@ interface InfraData {
   imports: [IonContent, CommonModule, FormsModule]
 })
 export class HomePage implements OnInit {
-  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' = 'resumen';
+  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert' = 'resumen';
   infraItems: ResumenEjecutivoItem[] = [];
   showProfileDropdown = false;
   @ViewChild('profileDropdown') profileDropdown?: ElementRef;
@@ -127,6 +127,13 @@ export class HomePage implements OnInit {
 
   getSelectedPeriodLabel() {
     return this.periodos.find(p => p.value === this.selectedPeriod)?.label || 'Seleccionar Período';
+  }
+
+  /** Opciones de período visibles: "Año Anterior" solo está disponible en la vista Resumen. */
+  get visiblePeriodos(): PeriodoOption[] {
+    return this.activeTab === 'resumen'
+      ? this.periodos
+      : this.periodos.filter(p => p.value !== 'ano_pasado');
   }
 
   // --- Datos de facturas ---
@@ -245,6 +252,74 @@ export class HomePage implements OnInit {
     return [`${maxMwh.toFixed(1)}`, `${midMwh.toFixed(1)}`, `${minMwh.toFixed(1)}`];
   }
 
+  // ── Interacción gráfico Tarifa vs Consumo ────────────────────────────
+  /** Índice del mes seleccionado en la gráfica (null = último mes disponible). */
+  selectedTrendIndex: number | null = null;
+
+  /** Área rellena bajo la curva de tarifa. */
+  get tarifaSvgArea(): string {
+    const p = this.tarifaSvgPath;
+    return p ? `${p} L 100,100 L 0,100 Z` : '';
+  }
+
+  /** Puntos de la tendencia con coordenadas (%) para el overlay de puntos. */
+  get trendPoints(): { x: number; consumoY: number; tarifaY: number; month: string; consumoRaw: number; tarifaRaw: number }[] {
+    const data = this.facturasData.tendenciaConsumo;
+    const n = data.length;
+    return data.map((d, i) => ({
+      x: n > 1 ? (i / (n - 1)) * 100 : 50,
+      consumoY: 100 - d.consumoVal,
+      tarifaY: 100 - d.tarifaVal,
+      month: d.month,
+      consumoRaw: d.consumoRaw,
+      tarifaRaw: d.tarifaRaw,
+    }));
+  }
+
+  /** Índice activo efectivo (por defecto el último mes disponible). */
+  get activeTrendIndex(): number {
+    const n = this.facturasData.tendenciaConsumo.length;
+    if (n === 0) return 0;
+    if (this.selectedTrendIndex === null || this.selectedTrendIndex < 0 || this.selectedTrendIndex >= n) return n - 1;
+    return this.selectedTrendIndex;
+  }
+
+  get activeTrendPoint(): { x: number; consumoY: number; tarifaY: number; month: string; consumoRaw: number; tarifaRaw: number } | null {
+    const pts = this.trendPoints;
+    return pts.length ? pts[this.activeTrendIndex] : null;
+  }
+
+  selectTrend(index: number) {
+    this.selectedTrendIndex = index;
+  }
+
+  private trendDelta(key: 'consumoRaw' | 'tarifaRaw'): number | null {
+    const data = this.facturasData.tendenciaConsumo;
+    const i = this.activeTrendIndex;
+    if (i <= 0 || !data[i - 1]) return null;
+    const prev = data[i - 1][key];
+    const cur = data[i][key];
+    if (!prev) return null;
+    return ((cur - prev) / prev) * 100;
+  }
+
+  get activeTrendTarifaLabel(): string {
+    const pt = this.activeTrendPoint;
+    return pt ? `$${Math.round(pt.tarifaRaw)}` : '—';
+  }
+
+  get activeTrendConsumoLabel(): string {
+    const pt = this.activeTrendPoint;
+    if (!pt) return '—';
+    return pt.consumoRaw >= 1000 ? `${(pt.consumoRaw / 1000).toFixed(2)} MWh` : `${Math.round(pt.consumoRaw)} kWh`;
+  }
+
+  get activeTrendTarifaDelta(): number | null { return this.trendDelta('tarifaRaw'); }
+  get activeTrendConsumoDelta(): number | null { return this.trendDelta('consumoRaw'); }
+
+  /** Valor absoluto redondeado de una variación %, para mostrar junto a la flecha. */
+  absRound(v: number | null): number { return v === null ? 0 : Math.abs(Math.round(v)); }
+
   getDetalleValue(sede: FacturaSede): string {
     if (this.detalleMetric === 'costo') {
       // Sin decimales
@@ -273,10 +348,16 @@ export class HomePage implements OnInit {
 
   // --- Alarmas por facturas faltantes (por contrato) ---
   facturasRawItems: any[] = [];
-  missingInvoiceAlarms: { contractNumber: string; lastDate: string; expectedMonth: string; customerName?: string; customerId?: string }[] = [];
+  missingInvoiceAlarms: { contractNumber: string; lastDate: string; expectedMonth: string; headquartersName?: string; customerName?: string; customerId?: string }[] = [];
 
-  // --- Alarmas por facturas pendientes de pago (payment_date null + due_date <= 5 días) ---
-  pendingPaymentAlarms: { invoiceNumber: string; contractNumber: string; headquartersName: string; expeditionDate: string; dueDate: string; totalToPay: string; daysLeft: number; customerName?: string; customerId?: string }[] = [];
+  // --- Alarmas de facturas basadas en la vista facturas_recibidas ---
+  // 'Vencida' → Factura Vencida (crítica)  |  'Por vencer' → Factura Por Vencer (alerta)
+  pendingPaymentAlarms: { invoiceNumber: string; contractNumber: string; headquartersName: string; expeditionDate: string; dueDate: string; totalToPay: string; daysLeft: number; paymentStatus: 'Vencida' | 'Por vencer'; customerName?: string; customerId?: string }[] = [];
+
+  // --- Filtro por Sede (módulo Facturas) — al mismo nivel que el filtro de Empresa ---
+  selectedFacturaSede = 'todas';
+  availableFacturaSedes: string[] = [];
+  showFacturaSedeDropdown = false;
 
   // --- Contratos ---
   estadosContratos: any[] = [];
@@ -371,7 +452,9 @@ export class HomePage implements OnInit {
   selectedSede = 'todas';
   showSedeDropdown = false;
   selectedTelemetriaMonth: { year: number; month: number } = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
-  selectedTelemetriaDate: string = new Date().toISOString().split('T')[0];
+  selectedTelemetriaDate: string = DashboardService.getLocalDateString();
+  /** Fecha a la que corresponden los datos horarios ya cargados (evita mostrar otro día) */
+  telemetriaHorariaLoadedDate = '';
   telemetriaSensorGroups: TelemetryGroup[] = [];
 
   // --- Mock Data para Historial ---
@@ -383,29 +466,41 @@ export class HomePage implements OnInit {
 
   get notifications(): { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] {
     if (this.currentContext === 'Gestión de Facturas') {
-      // Alarmas de facturas faltantes por contrato
+      // Seguimiento de pago (vista reporte_facturas_recibidas):
+      //   'Vencida'   → Factura Vencida   → CRÍTICA
+      //   'Por vencer' → Factura Por Vencer → ALERTA (próxima a vencer)
+      const pagoAlarms = this.pendingPaymentAlarms.map(p => {
+        const clientPrefix = this.hasMultipleCustomers() ? `[${p.customerName || p.customerId || ''}] ` : '';
+        if (p.paymentStatus === 'Vencida') {
+          return {
+            title: `${clientPrefix}🔴 Factura Vencida — Contrato ${p.contractNumber}`,
+            subtitle: `${p.headquartersName} • Venció: ${p.dueDate}`,
+            detail: `Factura ${p.invoiceNumber} • Expedida: ${p.expeditionDate} • Total: ${p.totalToPay}`,
+            type: 'factura_critical'
+          };
+        }
+        return {
+          title: `${clientPrefix}🟡 Factura Por Vencer — Contrato ${p.contractNumber}`,
+          subtitle: `${p.headquartersName} • Vence: ${p.dueDate}`,
+          detail: `Factura ${p.invoiceNumber} • Expedida: ${p.expeditionDate} • Total: ${p.totalToPay}`,
+          type: 'factura_warning'
+        };
+      });
+
+      // Facturas no recibidas (vista reporte_facturas_por_recibir): si hay filas para los
+      // filtros de empresa/sede activos, la factura esperada no ha llegado y requiere seguimiento.
       const missingAlarms = this.missingInvoiceAlarms.map(m => {
         const clientPrefix = this.hasMultipleCustomers() ? `[${m.customerName || m.customerId || ''}] ` : '';
         return {
-          title: `${clientPrefix}⚠️ Factura No Recibida`,
-          subtitle: `Contrato: ${m.contractNumber}`,
+          title: `${clientPrefix}⚠️ Factura No Recibida — Contrato ${m.contractNumber}`,
+          subtitle: `${m.headquartersName || 'Sede'} • Requiere seguimiento`,
           detail: `Factura de ${m.expectedMonth} no ha llegado. Última recibida: ${m.lastDate}`,
-          type: 'alarm'
+          type: 'factura_warning'
         };
       });
-      // Alarmas de pago: vencidas o por vencer en ≤ 5 días (desde reporte_datos_basicos_facturas)
-      const pendingAlarms = this.pendingPaymentAlarms.map(p => {
-        const clientPrefix = this.hasMultipleCustomers() ? `[${p.customerName || p.customerId || ''}] ` : '';
-        return {
-          title: p.daysLeft < 0
-            ? `${clientPrefix}🔴 Pago Vencido — Contrato ${p.contractNumber}`
-            : `${clientPrefix}🟡 Vence en ${p.daysLeft} día${p.daysLeft !== 1 ? 's' : ''} — Contrato ${p.contractNumber}`,
-          subtitle: `${p.headquartersName} • Vencimiento: ${p.dueDate}`,
-          detail: `Factura ${p.invoiceNumber} • Expedida: ${p.expeditionDate} • Total: ${p.totalToPay}`,
-          type: 'alarm'
-        };
-      });
-      return [...missingAlarms, ...pendingAlarms];
+
+      // Críticas (vencidas) primero, luego las alertas
+      return [...pagoAlarms, ...missingAlarms];
     } else if (this.currentContext === 'Medición Inteligente') {
       return this.getTelemetryAnomalyAlarms();
     } else {
@@ -425,7 +520,7 @@ export class HomePage implements OnInit {
               detail: a.alarm_description ?? 'Sin descripción disponible.',
               type: 'warning',
               serial: a.serial_number_device ?? a.device_id ?? '—',
-              date: a.record_date ? a.record_date.split(/[ T]/)[0] : '—',
+              date: a.record_date ? new Date(a.record_date.includes('T') || a.record_date.includes(' ') ? a.record_date.replace(' ', 'T') + (a.record_date.includes('Z') || a.record_date.includes('+') ? '' : 'Z') : a.record_date + 'T00:00:00Z').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—',
               rawItem: a
             };
           });
@@ -471,7 +566,7 @@ export class HomePage implements OnInit {
             detail,
             type,
             serial: card.sensorName,
-            date: new Date().toISOString().split('T')[0],
+            date: DashboardService.getLocalDateString(),
             rawItem: card
           });
         }
@@ -647,6 +742,9 @@ export class HomePage implements OnInit {
     this.selectedDeviceType = null;
     this.pendingPaymentAlarms = [];
     this.missingInvoiceAlarms = [];
+    this.selectedFacturaSede = 'todas';
+    this.availableFacturaSedes = [];
+    this.showFacturaSedeDropdown = false;
     this.facturasRawItems = [];
     this.telemetriaMensualItems = [];
     this.telemetriaDiariaItems = [];
@@ -664,6 +762,7 @@ export class HomePage implements OnInit {
     this.showPeriodDropdown = false;
     if (this.selectedPeriod === periodo) return;
     this.selectedPeriod = periodo;
+    this.selectedTrendIndex = null;
     this.loadFacturasData();
   }
 
@@ -691,46 +790,49 @@ export class HomePage implements OnInit {
   }
 
   /**
-   * Carga alarmas de pago desde descarga_facturas_estados.
-   * Alarma si payment_status === 'Vencida' o si es 'Pendiente' y faltan ≤ 5 días para due_date.
+   * Carga el seguimiento de pago desde la vista facturas_recibidas (payment_status).
+   *   'Vencida'   → Factura Vencida    → alarma CRÍTICA
+   *   'Por vencer' → Factura Por Vencer → alarma de ALERTA (próxima a vencer)
+   *   'Pagada'    → sin alarma
    */
   private loadPendingPaymentAlarms() {
     this.dashboardService.getFacturasRecibidas().subscribe({
       next: (items: DescargaFacturaEstadoItem[]) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const DAYS_THRESHOLD = 5;
 
         const alarms: typeof this.pendingPaymentAlarms = [];
 
         for (const inv of items) {
-          if (inv.payment_status === 'Pagada') continue;
+          // Solo alarmar en Vencida o Por vencer (Pagada no genera alarma)
+          if (inv.payment_status !== 'Vencida' && inv.payment_status !== 'Por vencer') continue;
 
           const due = new Date(inv.due_date);
           due.setHours(0, 0, 0, 0);
           const daysLeft = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-          // Alarmar si está vencida o si es pendiente y vence en ≤ 5 días
-          if (inv.payment_status === 'Vencida' || (inv.payment_status === 'Pendiente' && daysLeft <= DAYS_THRESHOLD)) {
-            alarms.push({
-              invoiceNumber: inv.invoice_number,
-              contractNumber: inv.contract_number,
-              headquartersName: inv.headquarters_name,
-              expeditionDate: inv.expedition_date ?? '—',
-              dueDate: inv.due_date,
-              totalToPay: `$${inv.total_to_pay.toLocaleString('es-CO')}`,
-              daysLeft,
-              customerName: inv.customer_name || '',
-              customerId: inv.customer_id || ''
-            });
-          }
+          alarms.push({
+            invoiceNumber: inv.invoice_number,
+            contractNumber: inv.contract_number,
+            headquartersName: inv.headquarters_name,
+            expeditionDate: inv.expedition_date ?? '—',
+            dueDate: inv.due_date,
+            totalToPay: `$${inv.total_to_pay.toLocaleString('es-CO')}`,
+            daysLeft,
+            paymentStatus: inv.payment_status,
+            customerName: inv.customer_name || '',
+            customerId: inv.customer_id || ''
+          });
         }
 
-        // Ordenar: primero los vencidos (daysLeft negativo), luego por urgencia
-        const sortedAlarms = alarms.sort((a, b) => a.daysLeft - b.daysLeft);
+        // Ordenar: primero las vencidas (por urgencia), luego las pendientes
+        const sortedAlarms = alarms.sort((a, b) => {
+          if (a.paymentStatus !== b.paymentStatus) return a.paymentStatus === 'Vencida' ? -1 : 1;
+          return a.daysLeft - b.daysLeft;
+        });
         this.rawPendingPaymentAlarms = sortedAlarms;
         this.applyCompanyFilter();
-        console.log(`💳 Alarmas de pago (facturas_recibidas): ${sortedAlarms.length}`, sortedAlarms);
+        console.log(`💳 Alarmas facturas_recibidas (Vencida/Por vencer): ${sortedAlarms.length}`, sortedAlarms);
       },
       error: (err) => {
         console.error('❌ Error al cargar facturas_recibidas:', err);
@@ -763,13 +865,14 @@ export class HomePage implements OnInit {
       }
     });
 
-    // Cargar alarmas de facturas faltantes desde contratos_sin_facturas_completas
+    // Alarmas de facturas no recibidas (reporte_facturas_por_recibir)
     this.loadMissingInvoiceAlarms();
   }
 
   /**
-   * Carga alarmas de facturas faltantes desde contratos_sin_facturas_completas.
-   * Solo alarma si days_overdue > 0 (ya pasó la fecha esperada de la factura).
+   * Carga alarmas de facturas no recibidas desde reporte_facturas_por_recibir.
+   * Cada fila que retorna la vista representa una factura esperada que no ha llegado;
+   * el filtrado por empresa/sede se aplica luego en applyCompanyFilter.
    */
   private loadMissingInvoiceAlarms() {
     this.dashboardService.getReporteFacturasPorRecibir().subscribe({
@@ -777,23 +880,22 @@ export class HomePage implements OnInit {
         const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                             'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-        const alarms: typeof this.missingInvoiceAlarms = items
-          .filter(i => i.days_overdue > 0)
-          .map(i => {
-            const missingDate = new Date(i.missing_month);
-            const expectedMonthName = `${monthNames[missingDate.getMonth()]} ${missingDate.getFullYear()}`;
-            return {
-              contractNumber: i.contract_number,
-              lastDate: `${i.expected_invoice_date}`,
-              expectedMonth: expectedMonthName,
-              customerName: i.customer_name || '',
-              customerId: i.customer_id || ''
-            };
-          });
+        const alarms: typeof this.missingInvoiceAlarms = items.map(i => {
+          const missingDate = new Date(i.missing_month);
+          const expectedMonthName = `${monthNames[missingDate.getMonth()]} ${missingDate.getFullYear()}`;
+          return {
+            contractNumber: i.contract_number,
+            lastDate: `${i.expected_invoice_date}`,
+            expectedMonth: expectedMonthName,
+            headquartersName: i.headquarters_name || '',
+            customerName: i.customer_name || '',
+            customerId: i.customer_id || ''
+          };
+        });
 
         this.rawMissingInvoiceAlarms = alarms;
         this.applyCompanyFilter();
-        console.log(`🔔 Facturas faltantes (reporte_facturas_por_recibir): ${alarms.length}`, alarms);
+        console.log(`🔔 Facturas no recibidas (reporte_facturas_por_recibir): ${alarms.length}`, alarms);
       },
       error: (err) => {
         console.error('❌ Error al cargar reporte_facturas_por_recibir:', err);
@@ -809,6 +911,7 @@ export class HomePage implements OnInit {
   selectCompany(companyId: string) {
     this.selectedCompanyId = companyId;
     this.showCompanyDropdown = false;
+    this.selectedTrendIndex = null;
     this.applyCompanyFilter();
   }
 
@@ -851,39 +954,91 @@ export class HomePage implements OnInit {
   applyCompanyFilter() {
     const cid = this.selectedCompanyId;
 
-    // 1. Filtrar facturas (dashboard)
-    if (this.rawFacturasCurrent) {
-      const filteredCurrent = cid === 'todos'
-        ? this.rawFacturasCurrent
-        : this.rawFacturasCurrent.filter(i => i.customer_id === cid);
+    // Paso 1: filtrar por Empresa (customer_id)
+    const facturasCurrentComp = cid === 'todos'
+      ? (this.rawFacturasCurrent || [])
+      : (this.rawFacturasCurrent || []).filter(i => i.customer_id === cid);
+    const facturasCompareComp = cid === 'todos'
+      ? (this.rawFacturasCompare || [])
+      : (this.rawFacturasCompare || []).filter(i => i.customer_id === cid);
+    const contratosComp = cid === 'todos'
+      ? [...(this.rawEstadosContratos || [])]
+      : (this.rawEstadosContratos || []).filter(c => c.customer_id === cid);
+    const alarmsComp = cid === 'todos'
+      ? [...(this.rawPendingPaymentAlarms || [])]
+      : (this.rawPendingPaymentAlarms || []).filter(a => a.customerId === cid);
+    const missingComp = cid === 'todos'
+      ? [...(this.rawMissingInvoiceAlarms || [])]
+      : (this.rawMissingInvoiceAlarms || []).filter(a => a.customerId === cid);
 
-      const filteredCompare = cid === 'todos'
-        ? this.rawFacturasCompare
-        : this.rawFacturasCompare.filter(i => i.customer_id === cid);
-
-      this.facturasData = this.dashboardService.buildDashboard(filteredCurrent, filteredCompare);
+    // Recalcular las sedes disponibles (solo sedes con contrato ACTIVO)
+    this.extractFacturaSedes(contratosComp);
+    if (this.selectedFacturaSede !== 'todas' && !this.availableFacturaSedes.includes(this.selectedFacturaSede)) {
+      this.selectedFacturaSede = 'todas';
     }
 
-    // 2. Filtrar contratos
-    if (this.rawEstadosContratos) {
-      this.estadosContratos = cid === 'todos'
-        ? [...this.rawEstadosContratos]
-        : this.rawEstadosContratos.filter(c => c.customer_id === cid);
-    }
+    // Paso 2: filtrar por Sede (headquarters_name)
+    const sede = this.selectedFacturaSede;
+    const bySedeFactura = (arr: FacturaItem[]) =>
+      sede === 'todas' ? arr : arr.filter(i => i.headquarters_name === sede);
 
-    // 3. Filtrar alarmas pendientes de pago
-    if (this.rawPendingPaymentAlarms) {
-      this.pendingPaymentAlarms = cid === 'todos'
-        ? [...this.rawPendingPaymentAlarms]
-        : this.rawPendingPaymentAlarms.filter(a => a.customerId === cid);
-    }
+    // 1. Dashboard de facturas
+    this.facturasData = this.dashboardService.buildDashboard(
+      bySedeFactura(facturasCurrentComp),
+      bySedeFactura(facturasCompareComp)
+    );
 
-    // 4. Filtrar alarmas de facturas faltantes
-    if (this.rawMissingInvoiceAlarms) {
-      this.missingInvoiceAlarms = cid === 'todos'
-        ? [...this.rawMissingInvoiceAlarms]
-        : this.rawMissingInvoiceAlarms.filter(a => a.customerId === cid);
+    // 2. Contratos
+    this.estadosContratos = sede === 'todas'
+      ? contratosComp
+      : contratosComp.filter(c => c.headquarters_name === sede);
+
+    // 3. Alarmas de pago (facturas_recibidas)
+    this.pendingPaymentAlarms = sede === 'todas'
+      ? alarmsComp
+      : alarmsComp.filter(a => a.headquartersName === sede);
+
+    // 4. Alarmas de facturas no recibidas (facturas_por_recibir)
+    this.missingInvoiceAlarms = sede === 'todas'
+      ? missingComp
+      : missingComp.filter(a => a.headquartersName === sede);
+  }
+
+  /**
+   * Sedes disponibles para el filtro del módulo de facturas.
+   * Solo se ofrecen las sedes que tienen al menos un contrato ACTIVO
+   * (se excluyen las que únicamente tienen contratos cancelados/inactivos).
+   */
+  private extractFacturaSedes(contratos: any[]) {
+    const set = new Set<string>();
+    (contratos || []).forEach(c => {
+      const estado = (c.state || c.status || '').toString().trim().toLowerCase();
+      const cancelado = estado === 'cancelado' || estado === 'inactivo'
+        || estado === 'cancelled' || estado === 'inactive';
+      if (!cancelado && c.headquarters_name) {
+        set.add(c.headquarters_name.trim());
+      }
+    });
+    const arr = Array.from(set).filter(Boolean).sort();
+    if (JSON.stringify(arr) !== JSON.stringify(this.availableFacturaSedes)) {
+      this.availableFacturaSedes = arr;
     }
+  }
+
+  // --- Helpers Filtro Sede (Facturas) ---
+  toggleFacturaSedeDropdown() {
+    this.showFacturaSedeDropdown = !this.showFacturaSedeDropdown;
+  }
+
+  selectFacturaSede(sede: string) {
+    this.selectedFacturaSede = sede;
+    this.showFacturaSedeDropdown = false;
+    this.selectedTrendIndex = null;
+    this.applyCompanyFilter();
+  }
+
+  getSelectedFacturaSedeLabel(): string {
+    return this.selectedFacturaSede === 'todas' ? 'Todas las Sedes' : this.selectedFacturaSede;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -929,7 +1084,7 @@ export class HomePage implements OnInit {
 
   /** Verifica si la fecha seleccionada ya es hoy (o futura) */
   isCurrentOrFutureDate(): boolean {
-    const today = new Date().toISOString().split('T')[0];
+    const today = DashboardService.getLocalDateString();
     return this.selectedTelemetriaDate >= today;
   }
 
@@ -968,11 +1123,15 @@ export class HomePage implements OnInit {
     this.historialModalOrigin = origin;
     if (origin === 'mensual') {
       this.historialModalTab = 'mensual';
-    } else {
-      this.historialModalTab = 'horario';
-      if (this.telemetriaHorariaItems.length === 0) {
-        this.loadTelemetriaHoraria();
-      }
+      return;
+    }
+
+    this.historialModalTab = 'horario';
+    // El historial abre sobre el mismo día que muestran las tarjetas (al entrar
+    // a Diario ese día es siempre hoy). Si los datos horarios en memoria son de
+    // otro día, se recargan para que la gráfica de 24h corresponda al día.
+    if (this.telemetriaHorariaLoadedDate !== this.selectedTelemetriaDate || this.telemetriaHorariaItems.length === 0) {
+      this.loadTelemetriaHoraria();
     }
   }
 
@@ -980,18 +1139,46 @@ export class HomePage implements OnInit {
     this.historialModalCard = null;
   }
 
+  /** Tarjeta diaria del sensor recalculada para la fecha seleccionada */
+  private getDiarioCardForSensor(sensorName: string): SensorCard | null {
+    const cards = this.groupBySensorDiario(
+      this.filterBySede(this.telemetriaDiariaItems),
+      this.filterBySede(this.telemetriaDiariaItemsCompare),
+      this.selectedTelemetriaDate,
+      this.filterBySedeHoraria(this.telemetriaHorariaItems)
+    );
+    return cards.find(c => c.sensorName === sensorName) || null;
+  }
+
   getHourlyModalCard(): SensorCard | null {
     if (!this.historialModalCard) return null;
+    // Mientras los datos horarios no correspondan al día seleccionado se
+    // muestra el estado de carga, en vez de la gráfica del día anterior.
+    if (this.telemetriaHorariaLoadedDate !== this.selectedTelemetriaDate) return null;
+
     const hourlyCards = this.groupBySensorHorario(
       this.filterBySedeHoraria(this.telemetriaHorariaItems),
       this.filterBySedeHoraria(this.telemetriaHorariaItemsCompare)
     );
     const found = hourlyCards.find(c => c.sensorName === this.historialModalCard?.sensorName);
-    if (found && (this.isSolarCard(found.variable, found.sensorName) || found.variable.toLowerCase().includes('consum'))) {
-      this.applyTotalSum(found);
-      found.valueLabel = 'Total del Día';
-    } else if (found) {
-      found.valueLabel = 'Promedio Horario';
+    if (found) {
+      if (this.isSolarCard(found.variable, found.sensorName) || found.variable.toLowerCase().includes('consum')) {
+        this.applyTotalSum(found);
+        found.valueLabel = 'Total del Día';
+      } else if (this.isOccupancyCard(found.variable, found.sensorName)) {
+        // La ocupación del día se toma del reporte diario del día seleccionado,
+        // recalculado en cada cambio de fecha (no de la tarjeta con la que se abrió).
+        const dayCard = this.getDiarioCardForSensor(found.sensorName);
+        if (dayCard) {
+          found.currentAvg = Math.round(dayCard.currentAvg);
+          found.compareAvg = Math.round(dayCard.compareAvg);
+          found.variationPct = dayCard.variationPct;
+          found.variationLabel = dayCard.variationLabel;
+        }
+        found.valueLabel = 'Ocupación del Día';
+      } else {
+        found.valueLabel = 'Promedio Horario';
+      }
     }
     return found || null;
   }
@@ -1043,8 +1230,8 @@ export class HomePage implements OnInit {
         if (periodType === 'mensual') {
           c.valueLabel = 'Consumo Total';
         } else if (periodType === 'diario') {
-          // El diario muestra el consumo DEL DÍA (no el total del mes, eso ya lo
-          // muestra la vista Mensual) comparado contra el promedio del mes.
+          // La tarjeta ya trae el valor del día seleccionado (groupBySensorDiario);
+          // no se recalcula con sumas del mes.
           c.valueLabel = 'Consumo del Día';
         } else {
           c.valueLabel = 'Consumo Total Horario';
@@ -1065,6 +1252,7 @@ export class HomePage implements OnInit {
         if (periodType === 'mensual') {
           c.valueLabel = 'Generación Total';
         } else if (periodType === 'diario') {
+          // Idem Consumos: el valor del día ya viene calculado y filtrado.
           c.valueLabel = 'Generación del Día';
         } else {
           c.valueLabel = 'Generación Total Horaria';
@@ -1082,12 +1270,20 @@ export class HomePage implements OnInit {
     // Agregar otros grupos
     Array.from(restMap.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([catName, catCards]) => {
       catCards.forEach(c => {
-        if (periodType === 'mensual') {
-          c.valueLabel = 'Promedio mensual';
-        } else if (periodType === 'diario') {
-          c.valueLabel = 'Valor del Día';
+        if (this.isOccupancyCard(c.variable, c.sensorName)) {
+          c.currentAvg = Math.round(c.currentAvg);
+          c.compareAvg = Math.round(c.compareAvg);
+          c.currentMax = Math.round(c.currentMax);
+          c.currentMin = Math.round(c.currentMin);
+          c.valueLabel = periodType === 'mensual' ? 'Total del Mes' : (periodType === 'diario' ? 'Ocupación del Día' : 'Ocupación Horaria');
         } else {
-          c.valueLabel = 'Promedio horario';
+          if (periodType === 'mensual') {
+            c.valueLabel = 'Promedio mensual';
+          } else if (periodType === 'diario') {
+            c.valueLabel = 'Valor del Día';
+          } else {
+            c.valueLabel = 'Promedio horario';
+          }
         }
       });
       groups.push({
@@ -1112,9 +1308,12 @@ export class HomePage implements OnInit {
     } else if (this.activeTab === 'diario') {
       const cards = this.groupBySensorDiario(
         this.filterBySede(this.telemetriaDiariaItems),
-        this.filterBySede(this.telemetriaDiariaItemsCompare)
+        this.filterBySede(this.telemetriaDiariaItemsCompare),
+        this.selectedTelemetriaDate,
+        this.filterBySedeHoraria(this.telemetriaHorariaItems)
       );
       this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'diario');
+      this.syncHistorialModalCard(cards);
     } else if (this.activeTab === 'horario') {
       const cards = this.groupBySensorHorario(
         this.filterBySedeHoraria(this.telemetriaHorariaItems),
@@ -1192,8 +1391,8 @@ export class HomePage implements OnInit {
               r => r.sensor_name === card.sensorName
             );
             const sum = sensorDailyRecords.reduce((acc, r) => acc + (r.value ?? 0), 0);
-            card.currentAvg = Math.round(sum * 100) / 100;
-            card.currentSum = Math.round(sum * 100) / 100;
+            card.currentAvg = Math.round(sum);
+            card.currentSum = Math.round(sum);
             card.valueLabel = 'Total del Mes';
             // Recalcular variación contra el mes anterior si existe
             if (card.compareAvg) {
@@ -1222,14 +1421,14 @@ export class HomePage implements OnInit {
     this.isLoadingTelemetria = true;
     this.telemetriaError = '';
 
-    // El diario siempre compara "hoy" contra el promedio del mes en curso (o el
-    // promedio del mes anterior si el mes en curso aún no tiene datos). No depende
-    // de ninguna selección del usuario — ese filtro ahora vive en la vista Mensual.
-    const hoy = new Date();
-    const year = hoy.getFullYear();
-    const month = hoy.getMonth() + 1;
+    if (!this.selectedTelemetriaDate) {
+      this.selectedTelemetriaDate = DashboardService.getLocalDateString();
+    }
+    const currentDate = this.selectedTelemetriaDate;
+    const [yearStr, monthStr] = currentDate.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
 
-    // Calcular mes anterior
     let compareYear = year;
     let compareMonth = month - 1;
     if (compareMonth < 1) {
@@ -1237,25 +1436,44 @@ export class HomePage implements OnInit {
       compareYear--;
     }
 
+    const d = new Date(currentDate + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    const prevDate = DashboardService.getLocalDateString(d);
+
     forkJoin({
-      current: this.dashboardService.getReporteTelemetriaDiaria(year, month),
-      compare: this.dashboardService.getReporteTelemetriaDiaria(compareYear, compareMonth)
+      currentDiaria: this.dashboardService.getReporteTelemetriaDiaria(year, month),
+      compareDiaria: this.dashboardService.getReporteTelemetriaDiaria(compareYear, compareMonth),
+      currentHoraria: this.dashboardService.getReporteTelemetriaHoraria(currentDate),
+      compareHoraria: this.dashboardService.getReporteTelemetriaHoraria(prevDate)
     }).subscribe({
       next: (res) => {
-        console.log(`📡 Telemetría diaria actual [${year}-${month}]:`, res.current.length, 'registros');
-        console.log(`📡 Telemetría diaria anterior [${compareYear}-${compareMonth}]:`, res.compare.length, 'registros');
-        this.telemetriaDiariaItems = res.current;
-        this.telemetriaDiariaItemsCompare = res.compare;
+        console.log(`📡 Telemetría diaria [${currentDate}]:`, res.currentDiaria.length, 'registros');
+        console.log(`📡 Telemetría horaria [${currentDate}]:`, res.currentHoraria.length, 'registros');
+
+        this.telemetriaDiariaItems = res.currentDiaria;
+        this.telemetriaDiariaItemsCompare = res.compareDiaria;
+        this.telemetriaHorariaItems = res.currentHoraria;
+        this.telemetriaHorariaItemsCompare = res.compareHoraria;
+        this.telemetriaHorariaLoadedDate = currentDate;
         this.isLoadingTelemetria = false;
+
         if (this.availableSedes.length === 0) {
-          // Extraer sedes uniendo ambas listas
-          this.extractSedes([...res.current, ...res.compare]);
+          this.extractSedes([...res.currentDiaria, ...res.compareDiaria]);
         }
+
+        // Diagnóstico: cuántos registros del mes corresponden al día filtrado
+        const registrosDelDia = res.currentDiaria.filter(r => (r.date_record || '').slice(0, 10) === currentDate).length;
+        console.log(`🗓️ Registros diarios que coinciden con ${currentDate}: ${registrosDelDia}` +
+          (registrosDelDia === 0 ? ' → se usa el acumulado horario del día como respaldo' : ''));
+
         const cards = this.groupBySensorDiario(
-          this.filterBySede(res.current),
-          this.filterBySede(res.compare)
+          this.filterBySede(res.currentDiaria),
+          this.filterBySede(res.compareDiaria),
+          currentDate,
+          this.filterBySedeHoraria(res.currentHoraria)
         );
         this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'diario');
+        this.syncHistorialModalCard(cards);
       },
       error: (err) => {
         console.error('❌ Error telemetría diaria:', err);
@@ -1263,6 +1481,16 @@ export class HomePage implements OnInit {
         this.telemetriaError = 'No se pudieron cargar los datos diarios.';
       }
     });
+  }
+
+  /**
+   * Si el modal de historial está abierto, lo reapunta a la tarjeta del mismo
+   * sensor recién recalculada, para que su contenido siga los cambios de día.
+   */
+  private syncHistorialModalCard(cards: SensorCard[]) {
+    if (!this.historialModalCard || this.historialModalOrigin !== 'diario') return;
+    const updated = cards.find(c => c.sensorName === this.historialModalCard!.sensorName);
+    if (updated) this.historialModalCard = updated;
   }
 
   loadTelemetriaHoraria() {
@@ -1273,7 +1501,7 @@ export class HomePage implements OnInit {
     // Calcular día anterior
     const d = new Date(currentDate + 'T12:00:00');
     d.setDate(d.getDate() - 1);
-    const prevDate = d.toISOString().split('T')[0];
+    const prevDate = DashboardService.getLocalDateString(d);
 
     forkJoin({
       current: this.dashboardService.getReporteTelemetriaHoraria(currentDate),
@@ -1284,20 +1512,28 @@ export class HomePage implements OnInit {
         console.log(`📡 Telemetría horaria anterior [${prevDate}]:`, res.compare.length, 'registros');
         this.telemetriaHorariaItems = res.current;
         this.telemetriaHorariaItemsCompare = res.compare;
+        this.telemetriaHorariaLoadedDate = currentDate;
         this.isLoadingTelemetria = false;
         if (this.availableSedes.length === 0) {
           this.extractSedesHoraria([...res.current, ...res.compare]);
         }
-        const cards = this.groupBySensorHorario(
-          this.filterBySedeHoraria(res.current),
-          this.filterBySedeHoraria(res.compare)
-        );
-        this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'horario');
+        // Solo la vista Horario arma sus tarjetas con estos datos; si la carga
+        // se disparó desde el modal de historial (vista Diario), no se tocan
+        // las tarjetas del día que ya están en pantalla.
+        if (this.activeTab === 'horario') {
+          const cards = this.groupBySensorHorario(
+            this.filterBySedeHoraria(res.current),
+            this.filterBySedeHoraria(res.compare)
+          );
+          // 'horario': estas tarjetas vienen de promedios horarios, así que sí
+          // necesitan la suma de las horas del día (applyTotalSum).
+          this.telemetriaSensorGroups = this.buildTelemetryGroups(cards, 'horario');
+        }
       },
       error: (err) => {
         console.error('❌ Error telemetría horaria:', err);
         this.isLoadingTelemetria = false;
-        this.telemetriaError = 'No se pudieron cargar los datos horarios.';
+        this.telemetriaError = 'No se pudieron cargar los datos diarios.';
       }
     });
   }
@@ -1428,7 +1664,12 @@ export class HomePage implements OnInit {
     });
   }
 
-  groupBySensorDiario(currentItems: TelemetriaMensualItem[], compareItems: TelemetriaMensualItem[]): SensorCard[] {
+  groupBySensorDiario(
+    currentItems: TelemetriaMensualItem[],
+    compareItems: TelemetriaMensualItem[],
+    targetDateStr: string = DashboardService.getLocalDateString(),
+    horariaItems: TelemetriaHorariaItem[] = []
+  ): SensorCard[] {
     const currentMap = new Map<string, TelemetriaMensualItem[]>();
     for (const item of currentItems) {
       if (!currentMap.has(item.sensor_name)) currentMap.set(item.sensor_name, []);
@@ -1452,20 +1693,45 @@ export class HomePage implements OnInit {
       const currentVals = currentValidRecords.map(r => r.value);
       const compareVals = compareValidRecords.map(r => r.value);
 
-      const currentSum = currentVals.reduce((s, v) => s + v, 0);
-      const compareSum = compareVals.reduce((s, v) => s + v, 0);
+      // Totales del MES completo: sirven de base de comparación, NUNCA como
+      // valor de la tarjeta (la tarjeta diaria muestra el día seleccionado).
+      const monthSum = currentVals.reduce((s, v) => s + v, 0);
+      const compareMonthSum = compareVals.reduce((s, v) => s + v, 0);
 
-      // "Consumo del día": se filtra explícitamente por la fecha de hoy.
-      // Si no hay dato para hoy todavía, se muestra 0.
-      const todayStr = new Date().toISOString().split('T')[0];
-      const todayRecord = currentValidRecords.find(r => r.date_record === todayStr);
-      const dayValue = todayRecord ? todayRecord.value : 0;
+      const firstRecord = currentRecords[0] || compareRecords[0];
+      const variable = firstRecord?.variable || '';
+      const isOcc = this.isOccupancyCard(variable, sensorName);
 
-      // Base de comparación: promedio del mes en curso; si aún no hay datos de este
-      // mes, se compara contra el promedio del mes anterior.
+      // "Valor del día": se filtra explícitamente por targetDateStr.
+      // Se normaliza a 'YYYY-MM-DD' por si date_record llega con hora.
+      const targetDay = (targetDateStr || '').slice(0, 10);
+      const dayRecords = currentValidRecords.filter(r => (r.date_record || '').slice(0, 10) === targetDay);
+      let dayValue = 0;
+      if (dayRecords.length > 0) {
+        if (isOcc) {
+          dayValue = Math.round(dayRecords.reduce((s, r) => s + (r.value ?? 0), 0));
+        } else {
+          dayValue = dayRecords[0].value;
+        }
+      } else if (horariaItems.length > 0) {
+        // Fallback en tiempo real si el registro del día actual aún no está en la tabla diaria:
+        const sensorHoraria = horariaItems.filter(r => r.sensor_name === sensorName && r.value !== null && r.value !== undefined);
+        if (sensorHoraria.length > 0) {
+          const hVals = sensorHoraria.map(r => r.value);
+          const hSum = hVals.reduce((s, v) => s + v, 0);
+          if (isOcc) {
+            dayValue = Math.round(hSum / hVals.length);
+          } else if (this.isSolarCard(variable, sensorName) || variable.toLowerCase().includes('consum')) {
+            dayValue = hSum;
+          } else {
+            dayValue = hSum / hVals.length;
+          }
+        }
+      }
+
       const hasMonthAvg = currentVals.length > 0;
-      const monthAvg = hasMonthAvg ? currentSum / currentVals.length : 0;
-      const prevMonthAvg = compareVals.length > 0 ? compareSum / compareVals.length : 0;
+      const monthAvg = hasMonthAvg ? monthSum / currentVals.length : 0;
+      const prevMonthAvg = compareVals.length > 0 ? compareMonthSum / compareVals.length : 0;
       const compareBasis = hasMonthAvg ? monthAvg : prevMonthAvg;
       const variationLabel = hasMonthAvg
         ? 'vs promedio del mes'
@@ -1480,15 +1746,11 @@ export class HomePage implements OnInit {
       const range = globalMax - globalMin || 1;
 
       const variationPct = compareBasis ? ((dayValue - compareBasis) / compareBasis) * 100 : 0;
-      const firstRecord = currentRecords[0] || compareRecords[0];
       const unit = firstRecord?.unit || '';
-      const variable = firstRecord?.variable || '';
       const headquarters = firstRecord?.headquarters_name || '';
 
-      // Trazados SVG por día del mes (1 a 31)
       const buildDailyPath = (records: TelemetriaMensualItem[]) => {
         if (records.length === 0) return { path: '', area: '' };
-        // Mapear registros a días del mes y ordenar
         const dayMap = new Map<number, number>();
         records.forEach(r => {
           const day = parseInt(r.date_record.split('-')[2], 10);
@@ -1500,7 +1762,7 @@ export class HomePage implements OnInit {
 
         const path = sortedDays.map((day, i) => {
           const val = dayMap.get(day)!;
-          const x = ((day - 1) / 30) * 100; // Normalizado 1-31 a 0-100
+          const x = ((day - 1) / 30) * 100;
           const y = 10 + ((val - globalMin) / range) * 80;
           return `${i === 0 ? 'M' : 'L'}${x},${100 - y}`;
         }).join(' ');
@@ -1518,12 +1780,14 @@ export class HomePage implements OnInit {
         unit,
         icon: this.getVariableIcon(variable),
         headquarters,
-        currentAvg: Math.round(dayValue * 100) / 100,
-        currentMax: Math.round(currentMax * 100) / 100,
-        currentMin: Math.round(currentMin * 100) / 100,
-        compareAvg: Math.round(compareBasis * 100) / 100,
-        currentSum: Math.round(currentSum * 100) / 100,
-        compareSum: Math.round(compareSum * 100) / 100,
+        currentAvg: isOcc ? Math.round(dayValue) : Math.round(dayValue * 100) / 100,
+        currentMax: isOcc ? Math.round(currentMax) : Math.round(currentMax * 100) / 100,
+        currentMin: isOcc ? Math.round(currentMin) : Math.round(currentMin * 100) / 100,
+        compareAvg: isOcc ? Math.round(compareBasis) : Math.round(compareBasis * 100) / 100,
+        // currentSum/compareSum en la vista diaria son del DÍA seleccionado
+        // (antes traían el acumulado del mes y aplastaban el valor del día).
+        currentSum: isOcc ? Math.round(dayValue) : Math.round(dayValue * 100) / 100,
+        compareSum: isOcc ? Math.round(compareBasis) : Math.round(compareBasis * 100) / 100,
         variationPct: Math.round(variationPct * 10) / 10,
         variationLabel,
         currentTrendPath: currPaths.path,
@@ -1581,7 +1845,11 @@ export class HomePage implements OnInit {
         // Promediar por hora para evitar duplicados en el mismo minuto/segundo si los hubiera
         const hourMap = new Map<number, number[]>();
         records.forEach(r => {
-          const hour = parseInt(r.datetime_record.substring(11, 13), 10);
+          // Usar la hora tal cual la retorna la API, sin ajuste de zona horaria (UTC).
+          // Se extrae directamente del string 'YYYY-MM-DD[T| ]HH:mm:ss'.
+          const timePart = r.datetime_record.split(/[T ]/)[1] || '';
+          const hour = parseInt(timePart.slice(0, 2), 10);
+          if (isNaN(hour)) return;
           if (!hourMap.has(hour)) hourMap.set(hour, []);
           hourMap.get(hour)!.push(r.value);
         });
@@ -1653,18 +1921,31 @@ export class HomePage implements OnInit {
   }
 
   prevTelemetriaDate() {
-    const d = new Date(this.selectedTelemetriaDate);
+    const d = new Date(this.selectedTelemetriaDate + 'T12:00:00');
     d.setDate(d.getDate() - 1);
-    this.selectedTelemetriaDate = d.toISOString().split('T')[0];
-    this.loadTelemetriaHoraria();
+    this.setTelemetriaDate(DashboardService.getLocalDateString(d));
   }
 
   nextTelemetriaDate() {
     if (this.isCurrentOrFutureDate()) return; // No avanzar más allá de hoy
-    const d = new Date(this.selectedTelemetriaDate);
+    const d = new Date(this.selectedTelemetriaDate + 'T12:00:00');
     d.setDate(d.getDate() + 1);
-    this.selectedTelemetriaDate = d.toISOString().split('T')[0];
-    this.loadTelemetriaHoraria();
+    this.setTelemetriaDate(DashboardService.getLocalDateString(d));
+  }
+
+  /**
+   * Cambia el día seleccionado y recarga lo necesario. En Diario (y en el modal
+   * de historial abierto desde ahí) una sola carga trae diaria + horaria del día,
+   * así las tarjetas y la gráfica de 24h se actualizan con el mismo día.
+   */
+  private setTelemetriaDate(dateStr: string) {
+    if (this.selectedTelemetriaDate === dateStr) return;
+    this.selectedTelemetriaDate = dateStr;
+    if (this.activeTab === 'horario') {
+      this.loadTelemetriaHoraria();
+    } else {
+      this.loadTelemetriaDiaria();
+    }
   }
 
   getTelemetriaDateLabel(): string {
@@ -1850,8 +2131,15 @@ export class HomePage implements OnInit {
     this.showNotificationsPanel = false;
   }
 
-  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario') {
+  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert') {
     this.activeTab = tab;
+    this.showPeriodDropdown = false;
+    // "Año Anterior" solo existe en Resumen; al salir a otra vista de facturas se vuelve a "Año Actual".
+    if (this.currentContext === 'Gestión de Facturas' && tab !== 'resumen' && this.selectedPeriod === 'ano_pasado') {
+      this.selectedPeriod = 'ano_actual';
+      this.selectedTrendIndex = null;
+      this.loadFacturasData();
+    }
     if (tab === 'detalle') {
       this.detalleMetric = 'costo';
     }
@@ -1865,6 +2153,7 @@ export class HomePage implements OnInit {
       this.loadTelemetriaMensual();
     }
     if (tab === 'diario') {
+      this.selectedTelemetriaDate = DashboardService.getLocalDateString();
       this.loadTelemetriaDiaria();
     }
     if (tab === 'horario') {
@@ -1941,11 +2230,27 @@ export class HomePage implements OnInit {
       }
     }
 
-    // Cerrar dropdown de sede al hacer clic fuera
+    // Cerrar dropdown de sede (Medición) al hacer clic fuera
     if (this.showSedeDropdown) {
       const sedeContainer = document.querySelector('.sede-selector-container');
       if (sedeContainer && !sedeContainer.contains(target)) {
         this.showSedeDropdown = false;
+      }
+    }
+
+    // Cerrar dropdown de sede (Facturas) al hacer clic fuera
+    if (this.showFacturaSedeDropdown) {
+      const facturaSedeContainer = document.querySelector('.factura-sede-selector-container');
+      if (facturaSedeContainer && !facturaSedeContainer.contains(target)) {
+        this.showFacturaSedeDropdown = false;
+      }
+    }
+
+    // Cerrar dropdown de período (Facturas) al hacer clic fuera
+    if (this.showPeriodDropdown) {
+      const periodContainer = document.querySelector('.factura-period-selector-container');
+      if (periodContainer && !periodContainer.contains(target)) {
+        this.showPeriodDropdown = false;
       }
     }
   }

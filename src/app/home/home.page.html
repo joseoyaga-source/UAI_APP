@@ -98,15 +98,15 @@
             <div *ngFor="let notification of notifications; let i = index"
                  (click)="handleNotificationClick(notification)"
                  class="rounded-r-3xl border-l-[4px] border border-surface-border bg-surface-container-low p-4 cursor-pointer hover:bg-surface-container-high transition-colors"
-                 [ngClass]="notification.subtitle?.includes('Crítica') || notification.subtitle?.includes('Critical') ? 'border-l-red-500' : notification.subtitle?.includes('Advertencia') ? 'border-l-yellow-400' : 'border-l-[#29E590]'">
+                 [ngClass]="notification.type === 'factura_critical' || notification.subtitle?.includes('Crítica') || notification.subtitle?.includes('Critical') ? 'border-l-red-500' : notification.type === 'factura_warning' || notification.subtitle?.includes('Advertencia') ? 'border-l-yellow-400' : 'border-l-[#29E590]'">
               <div class="flex items-start justify-between gap-3">
                 <div class="flex-1 min-w-0">
                   <p class="text-sm font-semibold text-white leading-tight mb-1">{{ notification.title }}</p>
                   <p class="text-xs text-neutral-400">{{ notification.subtitle }}</p>
                 </div>
                 <span class="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase flex-shrink-0"
-                      [ngClass]="notification.subtitle?.includes('Crítica') || notification.subtitle?.includes('Critical') ? 'bg-red-500/20 text-red-400' : notification.subtitle?.includes('Advertencia') ? 'bg-yellow-400/20 text-yellow-300' : 'bg-[#29E590]/15 text-[#29E590]'">
-                  {{ notification.subtitle?.includes('Crítica') ? 'Crítica' : notification.subtitle?.includes('Advertencia') ? 'Advertencia' : 'Alarma' }}
+                      [ngClass]="notification.type === 'factura_critical' || notification.subtitle?.includes('Crítica') || notification.subtitle?.includes('Critical') ? 'bg-red-500/20 text-red-400' : notification.type === 'factura_warning' || notification.subtitle?.includes('Advertencia') ? 'bg-yellow-400/20 text-yellow-300' : 'bg-[#29E590]/15 text-[#29E590]'">
+                  {{ notification.type === 'factura_critical' || notification.subtitle?.includes('Crítica') ? 'Crítica' : notification.type === 'factura_warning' || notification.subtitle?.includes('Advertencia') ? 'Advertencia' : 'Alarma' }}
                 </span>
               </div>
               <p class="mt-2 text-xs text-neutral-300 leading-relaxed">{{ notification.detail }}</p>
@@ -152,28 +152,79 @@
   </header>
 
   <main class="max-w-7xl mx-auto px-6 pb-36" style="padding-top: calc(env(safe-area-inset-top, 0px) + 80px);">
-    <!-- Selector de Empresa Global -->
-    <div *ngIf="currentContext === 'Gestión de Facturas' && availableCompanies.length > 0" class="company-selector-container relative mb-4">
-      <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
-        <span class="material-symbols-outlined text-[16px] text-[#29E490]">corporate_fare</span>
-        <button (click)="toggleCompanyDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
-          Empresa: {{ getSelectedCompanyLabel() }}
-          <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showCompanyDropdown">expand_more</span>
-        </button>
+    <!-- Filtros Globales (Facturas): Período (fila 1) · Empresa + Sede (fila 2) -->
+    <div *ngIf="currentContext === 'Gestión de Facturas'" class="mb-4 space-y-2">
+      <!-- Fila 1: Selector de Período (no aplica en Contratos ni UAI Expert) -->
+      <div *ngIf="activeTab !== 'historial' && activeTab !== 'uaiExpert'" class="factura-period-selector-container relative">
+        <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+          <span class="material-symbols-outlined text-[16px] text-[#29E490]">calendar_month</span>
+          <button (click)="togglePeriodDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
+            Período: {{ getSelectedPeriodLabel() }}
+            <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showPeriodDropdown">expand_more</span>
+          </button>
+        </div>
+
+        <!-- Dropdown Período -->
+        <div *ngIf="showPeriodDropdown" class="absolute top-full left-0 mt-2 z-50 w-56 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
+          <button *ngFor="let p of visiblePeriodos" (click)="selectPeriodo(p.value)"
+                  class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                  [class.text-[#29E490]]="selectedPeriod === p.value">
+            <span class="material-symbols-outlined text-base">{{ p.icon }}</span> {{ p.label }}
+          </button>
+        </div>
       </div>
 
-      <!-- Dropdown -->
-      <div *ngIf="showCompanyDropdown" class="absolute top-full left-0 mt-2 z-50 w-64 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
-        <button (click)="selectCompany('todos')"
-                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
-                [class.text-[#29E490]]="selectedCompanyId === 'todos'">
-          <span class="material-symbols-outlined text-base">all_inclusive</span> Todos
-        </button>
-        <button *ngFor="let c of availableCompanies" (click)="selectCompany(c.id)"
-                class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
-                [class.text-[#29E490]]="selectedCompanyId === c.id">
-          <span class="material-symbols-outlined text-base">domain</span> {{ c.name }}
-        </button>
+      <!-- Fila 2: Empresa + Sede -->
+      <div class="flex flex-wrap items-center gap-2">
+      <!-- Selector de Empresa -->
+      <div *ngIf="availableCompanies.length > 0" class="company-selector-container relative">
+        <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+          <span class="material-symbols-outlined text-[16px] text-[#29E490]">corporate_fare</span>
+          <button (click)="toggleCompanyDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
+            Empresa: {{ getSelectedCompanyLabel() }}
+            <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showCompanyDropdown">expand_more</span>
+          </button>
+        </div>
+
+        <!-- Dropdown Empresa -->
+        <div *ngIf="showCompanyDropdown" class="absolute top-full left-0 mt-2 z-50 w-64 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
+          <button (click)="selectCompany('todos')"
+                  class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                  [class.text-[#29E490]]="selectedCompanyId === 'todos'">
+            <span class="material-symbols-outlined text-base">all_inclusive</span> Todos
+          </button>
+          <button *ngFor="let c of availableCompanies" (click)="selectCompany(c.id)"
+                  class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                  [class.text-[#29E490]]="selectedCompanyId === c.id">
+            <span class="material-symbols-outlined text-base">domain</span> {{ c.name }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Selector de Sede -->
+      <div *ngIf="availableFacturaSedes.length > 0" class="factura-sede-selector-container relative">
+        <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+          <span class="material-symbols-outlined text-[16px] text-[#29E490]">location_on</span>
+          <button (click)="toggleFacturaSedeDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
+            Sede: {{ getSelectedFacturaSedeLabel() }}
+            <span class="material-symbols-outlined text-[16px] text-white/40 transition-transform duration-300" [class.rotate-180]="showFacturaSedeDropdown">expand_more</span>
+          </button>
+        </div>
+
+        <!-- Dropdown Sede -->
+        <div *ngIf="showFacturaSedeDropdown" class="absolute top-full left-0 mt-2 z-50 w-64 max-h-72 overflow-y-auto rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] animate-fade-in">
+          <button (click)="selectFacturaSede('todas')"
+                  class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                  [class.text-[#29E490]]="selectedFacturaSede === 'todas'">
+            <span class="material-symbols-outlined text-base">all_inclusive</span> Todas las Sedes
+          </button>
+          <button *ngFor="let s of availableFacturaSedes" (click)="selectFacturaSede(s)"
+                  class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
+                  [class.text-[#29E490]]="selectedFacturaSede === s">
+            <span class="material-symbols-outlined text-base">domain</span> {{ s }}
+          </button>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -210,27 +261,12 @@
           <div class="absolute -top-6 -right-6 w-40 h-40 rounded-full" style="background: radial-gradient(circle, rgba(41,228,144,0.12) 0%, transparent 70%)"></div>
           <div class="absolute bottom-0 left-0 w-24 h-24 rounded-full" style="background: radial-gradient(circle, rgba(41,228,144,0.06) 0%, transparent 70%)"></div>
 
-          <div class="relative z-10 px-5 pt-4 flex justify-between items-center">
-            <div class="flex items-center gap-1.5 bg-black/20 rounded-full px-3 py-1 border border-white/5">
-              <span class="material-symbols-outlined text-[13px] text-[#29E490]">calendar_month</span>
-              <button (click)="togglePeriodDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1">
-                {{ getSelectedPeriodLabel() }}
-                <span class="material-symbols-outlined text-[12px] text-white/40 transition-transform duration-300" [class.rotate-180]="showPeriodDropdown">expand_more</span>
-              </button>
-            </div>
+          <div class="relative z-10 px-5 pt-4 flex justify-end items-center">
             <div class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border"
                  [ngClass]="(facturasData.gastoCambio || 0) > 0 ? 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/20' : 'bg-[#29E490]/10 text-[#29E490] border-[#29E490]/20'">
               <span class="material-symbols-outlined text-[12px]">{{ (facturasData.gastoCambio || 0) > 0 ? 'trending_up' : 'trending_down' }}</span>
               {{ (facturasData.gastoCambio || 0) > 0 ? '+' : '' }}{{ facturasData.gastoCambio || 0 }}%
             </div>
-          </div>
-
-          <div *ngIf="showPeriodDropdown" class="absolute top-14 left-5 z-30 w-48 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
-            <button *ngFor="let p of periodos" (click)="selectPeriodo(p.value)"
-                    class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
-                    [class.text-[#29E490]]="selectedPeriod === p.value">
-              <span class="material-symbols-outlined text-base">{{ p.icon }}</span> {{ p.label }}
-            </button>
           </div>
 
           <div class="relative z-10 px-5 pt-3 pb-5">
@@ -288,113 +324,169 @@
         </div>
 
         <!-- GRAFICO DUAL-AXIS: Tarifa vs Consumo -->
-        <div class="rounded-[24px] border border-white/5 overflow-hidden" style="background:#014751">
+        <div class="relative rounded-[24px] border border-white/5 overflow-hidden" style="background:linear-gradient(160deg,#014751 0%,#01323c 100%)">
+          <!-- Glows decorativos -->
+          <div class="absolute -top-12 -right-10 w-44 h-44 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(245,158,11,0.14),transparent 70%)"></div>
+          <div class="absolute -bottom-14 -left-10 w-44 h-44 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.14),transparent 70%)"></div>
 
           <!-- Header -->
-          <div class="px-5 pt-4 pb-2 flex items-start justify-between">
+          <div class="relative z-10 px-5 pt-4 pb-1 flex items-start justify-between">
             <div>
-              <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">Evolucion Tarifa vs Consumo</h3>
-              <p class="text-[#91A2B8] text-[10px] mt-0.5 uppercase tracking-widest">por mes del periodo</p>
+              <h3 class="text-[#FDFEF0] text-sm font-bold tracking-tight">Evolución Tarifa vs Consumo</h3>
+              <p class="text-[#91A2B8] text-[10px] mt-0.5 uppercase tracking-widest">Toca un mes para ver el detalle</p>
             </div>
             <!-- Leyenda -->
-            <div class="flex flex-col gap-1 items-end">
+            <div class="flex flex-col gap-1.5 items-end">
               <div class="flex items-center gap-1.5">
-                <svg width="18" height="6"><path d="M0,3 L18,3" stroke="#F59E0B" stroke-width="1" stroke-linecap="round"/></svg>
+                <span class="inline-block w-3.5 h-[3px] rounded-full" style="background:linear-gradient(90deg,#F59E0B,#FFD36A)"></span>
                 <span class="text-[9px] font-semibold text-[#F59E0B]">Tarifa $/kWh</span>
               </div>
               <div class="flex items-center gap-1.5">
-                <svg width="18" height="6"><path d="M0,3 L18,3" stroke="#29E490" stroke-width="1" stroke-dasharray="3,1.5" stroke-linecap="round"/></svg>
-                <span class="text-[9px] font-semibold text-[#29E490]">kWh/factura</span>
+                <span class="inline-block w-3.5 h-[3px] rounded-full" style="background:linear-gradient(90deg,#1FBE77,#3DFCA8)"></span>
+                <span class="text-[9px] font-semibold text-[#29E490]">Consumo</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Lectura del mes seleccionado -->
+          <div *ngIf="activeTrendPoint as pt" class="relative z-10 mx-5 mt-2 mb-1 rounded-2xl bg-black/25 border border-white/5 px-4 py-2.5 flex items-center gap-3 animate-fade-in">
+            <div class="flex flex-col min-w-[42px]">
+              <span class="text-[8px] uppercase tracking-widest text-[#91A2B8] font-bold">Mes</span>
+              <span class="text-[#FDFEF0] text-sm font-black leading-tight">{{ pt.month }}</span>
+            </div>
+            <div class="h-9 w-px bg-white/10"></div>
+            <!-- Tarifa -->
+            <div class="flex flex-col flex-1">
+              <span class="text-[8px] uppercase tracking-widest text-[#F59E0B] font-bold">Tarifa</span>
+              <div class="flex items-baseline gap-1">
+                <span class="text-[#FDFEF0] text-sm font-black leading-tight">{{ activeTrendTarifaLabel }}</span>
+                <span class="text-[8px] text-[#91A2B8]">/kWh</span>
+                <span *ngIf="activeTrendTarifaDelta !== null && absRound(activeTrendTarifaDelta) > 0"
+                      class="text-[9px] font-bold ml-0.5"
+                      [ngClass]="activeTrendTarifaDelta > 0 ? 'text-[#EF4444]' : 'text-[#29E490]'">
+                  {{ activeTrendTarifaDelta > 0 ? '▲' : '▼' }}{{ absRound(activeTrendTarifaDelta) }}%
+                </span>
+              </div>
+            </div>
+            <!-- Consumo -->
+            <div class="flex flex-col flex-1">
+              <span class="text-[8px] uppercase tracking-widest text-[#29E490] font-bold">Consumo</span>
+              <div class="flex items-baseline gap-1">
+                <span class="text-[#FDFEF0] text-sm font-black leading-tight">{{ activeTrendConsumoLabel }}</span>
+                <span *ngIf="activeTrendConsumoDelta !== null && absRound(activeTrendConsumoDelta) > 0"
+                      class="text-[9px] font-bold ml-0.5"
+                      [ngClass]="activeTrendConsumoDelta > 0 ? 'text-[#EF4444]' : 'text-[#29E490]'">
+                  {{ activeTrendConsumoDelta > 0 ? '▲' : '▼' }}{{ absRound(activeTrendConsumoDelta) }}%
+                </span>
               </div>
             </div>
           </div>
 
           <!-- SVG Chart + Ejes -->
-          <div class="relative pb-7 pt-1 px-1">
+          <div class="relative z-10 pb-7 pt-2 px-1">
 
             <!-- Eje Y izquierdo (Tarifa $) -->
-            <div class="absolute left-2 top-0 bottom-7 flex flex-col justify-between pointer-events-none z-10">
-              <span class="text-[8px] font-semibold text-[#F59E0B]/60">{{ tarifaAxisLabels[0] }}</span>
-              <span class="text-[8px] font-semibold text-[#F59E0B]/60">{{ tarifaAxisLabels[1] }}</span>
-              <span class="text-[8px] font-semibold text-[#F59E0B]/60">{{ tarifaAxisLabels[2] }}</span>
+            <div class="absolute left-2 top-2 bottom-7 flex flex-col justify-between pointer-events-none z-20">
+              <span class="text-[8px] font-semibold text-[#F59E0B]/70">{{ tarifaAxisLabels[0] }}</span>
+              <span class="text-[8px] font-semibold text-[#F59E0B]/70">{{ tarifaAxisLabels[1] }}</span>
+              <span class="text-[8px] font-semibold text-[#F59E0B]/70">{{ tarifaAxisLabels[2] }}</span>
             </div>
 
-            <!-- SVG -->
-            <div class="relative h-44 mx-9">
+            <!-- Área de la gráfica -->
+            <div class="relative h-52 mx-9">
               <svg class="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
-                  <!-- Glow tarifa -->
-                  <filter id="tarifaGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="0.6" result="blur"/>
-                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                  </filter>
-                  <!-- Glow consumo -->
-                  <filter id="consumoGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="0.6" result="blur"/>
-                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                  </filter>
-                  <!-- Gradiente área consumo -->
                   <linearGradient id="consumoArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#29E490" stop-opacity="0.07"/>
+                    <stop offset="0%" stop-color="#29E490" stop-opacity="0.38"/>
+                    <stop offset="55%" stop-color="#29E490" stop-opacity="0.10"/>
                     <stop offset="100%" stop-color="#29E490" stop-opacity="0"/>
                   </linearGradient>
-                  <!-- Gradiente área tarifa -->
                   <linearGradient id="tarifaArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.06"/>
+                    <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.30"/>
+                    <stop offset="60%" stop-color="#F59E0B" stop-opacity="0.08"/>
                     <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/>
                   </linearGradient>
+                  <linearGradient id="consumoStroke" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#1FBE77"/>
+                    <stop offset="100%" stop-color="#3DFCA8"/>
+                  </linearGradient>
+                  <linearGradient id="tarifaStroke" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#F59E0B"/>
+                    <stop offset="100%" stop-color="#FFD36A"/>
+                  </linearGradient>
+                  <!-- Máscara de entrada (barrido izq→der; si SMIL no corre, queda visible) -->
+                  <mask id="trendWipe">
+                    <rect x="0" y="0" width="100" height="100" fill="#fff">
+                      <animate attributeName="width" values="0;100" dur="1s" fill="freeze"
+                               calcMode="spline" keyTimes="0;1" keySplines="0.4 0 0.2 1"/>
+                    </rect>
+                  </mask>
                 </defs>
 
                 <!-- Grid sutil -->
-                <line x1="0" y1="0"   x2="100" y2="0"   stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.25"/>
-                <line x1="0" y1="25"  x2="100" y2="25"  stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.25"/>
-                <line x1="0" y1="50"  x2="100" y2="50"  stroke="#FDFEF0" stroke-opacity="0.06" stroke-width="0.25"/>
-                <line x1="0" y1="75"  x2="100" y2="75"  stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.25"/>
-                <line x1="0" y1="100" x2="100" y2="100" stroke="#FDFEF0" stroke-opacity="0.04" stroke-width="0.25"/>
+                <g stroke="#FDFEF0" stroke-width="0.5" vector-effect="non-scaling-stroke">
+                  <line x1="0" y1="10"  x2="100" y2="10"  stroke-opacity="0.05"/>
+                  <line x1="0" y1="32"  x2="100" y2="32"  stroke-opacity="0.05"/>
+                  <line x1="0" y1="55"  x2="100" y2="55"  stroke-opacity="0.07"/>
+                  <line x1="0" y1="78"  x2="100" y2="78"  stroke-opacity="0.05"/>
+                </g>
 
-                <!-- Área rellena consumo -->
-                <path [attr.d]="trendSvgArea" fill="url(#consumoArea)"/>
-                <!-- Área rellena tarifa -->
-                <path [attr.d]="tarifaSvgPath + ' L 100,100 L 0,100 Z'" fill="url(#tarifaArea)"/>
+                <!-- Línea guía del mes activo -->
+                <line *ngIf="activeTrendPoint as pt" [attr.x1]="pt.x" [attr.x2]="pt.x" y1="0" y2="100"
+                      stroke="#FDFEF0" stroke-opacity="0.28" stroke-width="1"
+                      stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
 
-                <!-- Consumo — línea punteada verde -->
-                <path [attr.d]="trendSvgPath" fill="none"
-                      stroke="#29E490" stroke-width="0.7"
-                      stroke-dasharray="2.5,2" stroke-linecap="round" stroke-linejoin="round"
-                      filter="url(#consumoGlow)"/>
+                <g mask="url(#trendWipe)">
+                  <!-- Áreas -->
+                  <path [attr.d]="tarifaSvgArea" fill="url(#tarifaArea)"/>
+                  <path [attr.d]="trendSvgArea" fill="url(#consumoArea)"/>
 
-                <!-- Tarifa — línea sólida naranja -->
-                <path [attr.d]="tarifaSvgPath" fill="none"
-                      stroke="#F59E0B" stroke-width="0.7"
-                      stroke-linecap="round" stroke-linejoin="round"
-                      filter="url(#tarifaGlow)"/>
+                  <!-- Tarifa: halo + línea -->
+                  <path [attr.d]="tarifaSvgPath" fill="none" stroke="#F59E0B" stroke-opacity="0.18"
+                        stroke-width="6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path [attr.d]="tarifaSvgPath" fill="none" stroke="url(#tarifaStroke)"
+                        stroke-width="2.3" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
 
-                <!-- Puntos consumo -->
-                <circle *ngFor="let item of facturasData.tendenciaConsumo; let i = index"
-                        [attr.cx]="i * (100 / (facturasData.tendenciaConsumo.length > 1 ? facturasData.tendenciaConsumo.length - 1 : 1))"
-                        [attr.cy]="100 - item.consumoVal"
-                        r="0.9" fill="#014751" stroke="#29E490" stroke-width="0.6"/>
-
-                <!-- Puntos tarifa -->
-                <circle *ngFor="let item of facturasData.tendenciaConsumo; let i = index"
-                        [attr.cx]="i * (100 / (facturasData.tendenciaConsumo.length > 1 ? facturasData.tendenciaConsumo.length - 1 : 1))"
-                        [attr.cy]="100 - item.tarifaVal"
-                        r="0.9" fill="#014751" stroke="#F59E0B" stroke-width="0.6"/>
+                  <!-- Consumo: halo + línea -->
+                  <path [attr.d]="trendSvgPath" fill="none" stroke="#29E490" stroke-opacity="0.18"
+                        stroke-width="6" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path [attr.d]="trendSvgPath" fill="none" stroke="url(#consumoStroke)"
+                        stroke-width="2.3" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>
+                </g>
               </svg>
+
+              <!-- Overlay de puntos (HTML → siempre redondos) -->
+              <div class="absolute inset-0 pointer-events-none">
+                <ng-container *ngFor="let pt of trendPoints; let i = index">
+                  <span class="trend-dot" [style.left.%]="pt.x" [style.top.%]="pt.tarifaY"
+                        [style.animation-delay.ms]="i * 70 + 40"
+                        [ngClass]="i === activeTrendIndex ? 'trend-dot--tarifa-active' : 'trend-dot--tarifa'"></span>
+                  <span class="trend-dot" [style.left.%]="pt.x" [style.top.%]="pt.consumoY"
+                        [style.animation-delay.ms]="i * 70"
+                        [ngClass]="i === activeTrendIndex ? 'trend-dot--consumo-active' : 'trend-dot--consumo'"></span>
+                </ng-container>
+              </div>
+
+              <!-- Columnas táctiles para seleccionar el mes -->
+              <div class="absolute inset-0 flex">
+                <button *ngFor="let pt of trendPoints; let i = index" (click)="selectTrend(i)"
+                        type="button" class="flex-1 h-full bg-transparent focus:outline-none active:bg-white/5 transition-colors"
+                        [attr.aria-label]="'Ver ' + pt.month"></button>
+              </div>
             </div>
 
             <!-- Eje Y derecho (Consumo MWh) -->
-            <div class="absolute right-2 top-0 bottom-7 flex flex-col justify-between pointer-events-none z-10">
-              <span class="text-[8px] font-semibold text-[#29E490]/60">{{ consumoAxisLabels[0] }} MWh</span>
-              <span class="text-[8px] font-semibold text-[#29E490]/60">{{ consumoAxisLabels[1] }}</span>
-              <span class="text-[8px] font-semibold text-[#29E490]/60">{{ consumoAxisLabels[2] }}</span>
+            <div class="absolute right-2 top-2 bottom-7 flex flex-col justify-between pointer-events-none z-20">
+              <span class="text-[8px] font-semibold text-[#29E490]/70">{{ consumoAxisLabels[0] }} MWh</span>
+              <span class="text-[8px] font-semibold text-[#29E490]/70">{{ consumoAxisLabels[1] }}</span>
+              <span class="text-[8px] font-semibold text-[#29E490]/70">{{ consumoAxisLabels[2] }}</span>
             </div>
 
             <!-- Labels eje X -->
-            <div class="flex justify-between mt-1 mx-9">
-              <span *ngFor="let item of facturasData.tendenciaConsumo; let last = last"
-                    class="text-center flex-1 text-[8px] font-semibold leading-none"
-                    [ngClass]="last ? 'text-[#29E490]' : 'text-[#91A2B8]/50'">
+            <div class="flex justify-between mt-1.5 mx-9">
+              <span *ngFor="let item of facturasData.tendenciaConsumo; let i = index"
+                    class="text-center flex-1 text-[8px] font-bold leading-none transition-colors"
+                    [ngClass]="i === activeTrendIndex ? 'text-[#FDFEF0]' : 'text-[#91A2B8]/50'">
                 {{ item.month }}
               </span>
             </div>
@@ -1029,24 +1121,6 @@
     <ng-container *ngIf="activeTab === 'detalle'">
       <div class="space-y-4 animate-fade-in pb-10">
         <ng-container *ngIf="currentContext === 'Gestión de Facturas'">
-          <!-- Selector de Período copiado del Resumen -->
-          <div class="relative flex items-center gap-1.5 bg-[#014751] w-max rounded-full px-4 py-2 border border-white/5 mb-2 shadow-sm">
-            <span class="material-symbols-outlined text-[14px] text-[#29E490]">calendar_month</span>
-            <button (click)="togglePeriodDropdown()" class="text-xs font-bold text-[#FDFEF0] flex items-center gap-1">
-              {{ getSelectedPeriodLabel() }}
-              <span class="material-symbols-outlined text-[14px] text-white/40 transition-transform duration-300" [class.rotate-180]="showPeriodDropdown">expand_more</span>
-            </button>
-            
-            <!-- Dropdown -->
-            <div *ngIf="showPeriodDropdown" class="absolute top-full left-0 mt-2 z-30 w-48 rounded-2xl bg-[#022022]/98 backdrop-blur-3xl border border-white/10 shadow-[0_15px_50px_rgba(0,0,0,0.7)] overflow-hidden animate-fade-in">
-              <button *ngFor="let p of periodos" (click)="selectPeriodo(p.value)"
-                      class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
-                      [class.text-[#29E490]]="selectedPeriod === p.value">
-                <span class="material-symbols-outlined text-base">{{ p.icon }}</span> {{ p.label }}
-              </button>
-            </div>
-          </div>
-
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-[#FDFEF0] text-lg font-bold tracking-tight">Detalle por Sede</h2>
             <div class="flex items-center bg-[#014751] rounded-full p-1 border border-white/5 shadow-inner">
@@ -1080,6 +1154,77 @@
         </ng-container>
 
         <!-- No detail page for Infrastructure context -->
+      </div>
+    </ng-container>
+
+    <!-- Pestaña: UAI Expert (Facturas) — Resumen gerencial con IA (en construcción) -->
+    <ng-container *ngIf="currentContext === 'Gestión de Facturas' && activeTab === 'uaiExpert'">
+      <div class="space-y-4 animate-fade-in pb-10">
+
+        <!-- Hero -->
+        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/15 p-6 text-center" style="background: linear-gradient(160deg,#014751 0%,#013440 55%,#022022 100%)">
+          <div class="absolute -top-10 -right-8 w-40 h-40 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.16),transparent 70%)"></div>
+          <div class="absolute -bottom-12 -left-10 w-40 h-40 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.10),transparent 70%)"></div>
+
+          <div class="relative z-10 flex flex-col items-center gap-3">
+            <div class="w-16 h-16 rounded-2xl bg-[#29E490]/15 border border-[#29E490]/25 flex items-center justify-center">
+              <span class="material-symbols-outlined text-[#29E490] text-[34px] uai-pulse">auto_awesome</span>
+            </div>
+            <div>
+              <h2 class="text-[#FDFEF0] text-xl font-black tracking-tight">UAI Expert</h2>
+              <p class="text-[#91A2B8] text-[11px] uppercase tracking-widest font-bold mt-1">Resumen gerencial con IA</p>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-[#F59E0B] text-[10px] font-bold uppercase tracking-wider">
+              <span class="material-symbols-outlined text-[13px]">construction</span> En construcción
+            </span>
+          </div>
+        </div>
+
+        <!-- Mensaje al usuario -->
+        <div class="rounded-2xl bg-[#014751]/50 border border-white/5 px-5 py-4 text-center">
+          <p class="text-[#FDFEF0] text-sm font-semibold leading-relaxed">Estamos trabajando en esta funcionalidad 🚧</p>
+          <p class="text-[#91A2B8] text-xs mt-2 leading-relaxed">
+            Muy pronto UAI Expert analizará <span class="text-[#29E490] font-semibold">todo el historial de facturas</span> y sus variables para entregarte un resumen gerencial claro y accionable.
+          </p>
+        </div>
+
+        <!-- Preview de alcances -->
+        <div>
+          <p class="text-[#91A2B8] text-[10px] uppercase tracking-widest font-bold mb-2 pl-1">Qué podrás consultar</p>
+          <div class="space-y-2">
+            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
+              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                <span class="material-symbols-outlined text-lg">corporate_fare</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-[#FDFEF0] text-xs font-bold">Por empresa</p>
+                <p class="text-[10px] text-[#91A2B8]">Resumen ejecutivo del comportamiento de cada empresa.</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
+              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                <span class="material-symbols-outlined text-lg">location_on</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-[#FDFEF0] text-xs font-bold">Por sucursal</p>
+                <p class="text-[10px] text-[#91A2B8]">Detalle del consumo y costos por cada sede.</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
+              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                <span class="material-symbols-outlined text-lg">insights</span>
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-[#FDFEF0] text-xs font-bold">General</p>
+                <p class="text-[10px] text-[#91A2B8]">Visión consolidada de todas tus empresas y sucursales.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="text-center text-[9px] text-[#91A2B8]/70 uppercase tracking-widest font-semibold pt-1">
+          Potenciado por Inteligencia Artificial
+        </p>
       </div>
     </ng-container>
 
@@ -1310,6 +1455,17 @@
     <!-- Pestaña: Diario (Medición Inteligente) -->
     <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'diario'">
       <div class="space-y-4 animate-fade-in pb-10">
+        <!-- Selector de Día (Paginador). Al entrar a la pestaña siempre arranca en el día actual -->
+        <div class="flex items-center justify-between bg-[#014751]/30 border border-white/5 rounded-full p-1.5 shadow-sm">
+          <button (click)="prevTelemetriaDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors">
+            <span class="material-symbols-outlined text-sm">chevron_left</span>
+          </button>
+          <span class="text-xs font-bold text-[#FDFEF0] tracking-tight uppercase">{{ getTelemetriaDateLabel() }}</span>
+          <button (click)="nextTelemetriaDate()" [disabled]="isCurrentOrFutureDate()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white hover:bg-white/10 transition-colors" [class.opacity-30]="isCurrentOrFutureDate()" [class.cursor-not-allowed]="isCurrentOrFutureDate()">
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+          </button>
+        </div>
+
         <!-- Mensaje de error/carga -->
         <div *ngIf="isLoadingTelemetria" class="flex flex-col items-center justify-center py-16 gap-3">
           <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
@@ -1418,6 +1574,14 @@
                 [ngClass]="activeTab === 'historial' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
           <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'historial'">description</span>
           <span>Contratos</span>
+        </button>
+
+        <!-- UAI Expert (Facturas) -->
+        <button *ngIf="currentContext === 'Gestión de Facturas'" aria-label="UAI Expert" (click)="switchTab('uaiExpert')"
+                class="flex-1 flex flex-col items-center justify-center text-[10px] font-bold transition-all duration-300 h-full rounded-full"
+                [ngClass]="activeTab === 'uaiExpert' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
+          <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'uaiExpert'">auto_awesome</span>
+          <span>UAI Expert</span>
         </button>
 
         <!-- Tab Derecha (Infraestructura) -->

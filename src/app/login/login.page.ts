@@ -5,7 +5,7 @@ import { IonContent, IonInput, IonIcon, IonButton, AlertController } from '@ioni
 import { AuthService } from '../services/auth';
 import { BiometricService } from '../services/biometric.service';
 import { addIcons } from 'ionicons';
-import { mailOutline, lockClosedOutline, flash, eyeOutline, eyeOffOutline, fingerPrintOutline, scanOutline } from 'ionicons/icons';
+import { mailOutline, lockClosedOutline, flash, eyeOutline, eyeOffOutline, fingerPrintOutline, scanOutline, checkmarkOutline } from 'ionicons/icons';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 
@@ -23,9 +23,16 @@ export class LoginPage implements OnInit, OnDestroy {
   keyboardOpen: boolean = false;
 
   // Estado del login biométrico (Face ID / huella)
+  biometricAvailable: boolean = false; // el hardware biométrico está disponible en el dispositivo
   biometricEnabled: boolean = false;   // hay credenciales guardadas y el hardware está disponible
   biometricLabel: string = 'Face ID';  // texto adaptado al dispositivo
   biometricIcon: string = 'scan-outline';
+
+  // "Recordar usuario y contraseña" (fallback para dispositivos sin biometría)
+  rememberMe: boolean = false;
+  private readonly REMEMBER_FLAG = 'uai_remember_enabled';
+  private readonly REMEMBER_EMAIL = 'uai_remember_email';
+  private readonly REMEMBER_PASSWORD = 'uai_remember_password';
 
   // 👈 IMPORTANTE: Inyectamos el Router aquí
   constructor(
@@ -35,7 +42,7 @@ export class LoginPage implements OnInit, OnDestroy {
     private ngZone: NgZone,
     private alertController: AlertController
   ) {
-    addIcons({ mailOutline, lockClosedOutline, flash, eyeOutline, eyeOffOutline, fingerPrintOutline, scanOutline });
+    addIcons({ mailOutline, lockClosedOutline, flash, eyeOutline, eyeOffOutline, fingerPrintOutline, scanOutline, checkmarkOutline });
   }
 
   async ngOnInit() {
@@ -54,6 +61,7 @@ export class LoginPage implements OnInit, OnDestroy {
     }
 
     await this.checkBiometricState();
+    this.loadRememberedCredentials();
   }
 
   ngOnDestroy() {
@@ -72,8 +80,50 @@ export class LoginPage implements OnInit, OnDestroy {
     this.biometricIcon = this.biometricLabel === 'huella' ? 'finger-print-outline' : 'scan-outline';
 
     this.ngZone.run(() => {
+      this.biometricAvailable = available;
       this.biometricEnabled = hasCreds;
     });
+  }
+
+  /**
+   * Carga las credenciales recordadas (si el usuario activó "Recordar") y
+   * prellena el formulario para que solo tenga que pulsar INGRESAR.
+   */
+  private loadRememberedCredentials() {
+    try {
+      if (localStorage.getItem(this.REMEMBER_FLAG) === 'true') {
+        this.rememberMe = true;
+        this.email = localStorage.getItem(this.REMEMBER_EMAIL) || '';
+        this.password = localStorage.getItem(this.REMEMBER_PASSWORD) || '';
+      }
+    } catch {
+      // Si localStorage no está disponible, simplemente no se recuerda nada.
+    }
+  }
+
+  /** Guarda o borra las credenciales recordadas según el estado del check. */
+  private persistRememberedCredentials() {
+    try {
+      if (this.rememberMe) {
+        localStorage.setItem(this.REMEMBER_FLAG, 'true');
+        localStorage.setItem(this.REMEMBER_EMAIL, this.email);
+        localStorage.setItem(this.REMEMBER_PASSWORD, this.password);
+      } else {
+        localStorage.removeItem(this.REMEMBER_FLAG);
+        localStorage.removeItem(this.REMEMBER_EMAIL);
+        localStorage.removeItem(this.REMEMBER_PASSWORD);
+      }
+    } catch {
+      // Sin almacenamiento disponible: no se puede recordar.
+    }
+  }
+
+  toggleRememberMe() {
+    this.rememberMe = !this.rememberMe;
+    // Si lo desactiva, borrar de inmediato lo que hubiera guardado.
+    if (!this.rememberMe) {
+      this.persistRememberedCredentials();
+    }
   }
 
   /**
@@ -106,6 +156,8 @@ export class LoginPage implements OnInit, OnDestroy {
       this.authService.login(this.email, this.password).subscribe({
         next: async (response) => {
           console.log('¡Conexión Exitosa con Keycloak!', response);
+          // Recordar usuario/contraseña si el usuario lo activó
+          this.persistRememberedCredentials();
           // Ofrecer activar el ingreso biométrico tras un login manual exitoso
           await this.offerBiometricEnrollment(this.email, this.password);
           // 👈 IMPORTANTE: Hacemos el teletransporte mágico al Dashboard
