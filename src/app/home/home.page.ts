@@ -1,11 +1,12 @@
-import { Component, HostListener, ViewChild, ElementRef, OnInit } from '@angular/core';
+import { Component, HostListener, ViewChild, ElementRef, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonContent } from '@ionic/angular/standalone';
 import { Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { AuthService } from '../services/auth';
-import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura, DescargaFacturaEstadoItem, ContratoSinFacturaCompletaItem, FacturaItem, TelemetriaMensualItem, TelemetriaHorariaItem } from '../services/dashboard.service';
+import { NotificationService } from '../services/notification.service';
+import { DashboardService, FacturasDashboard, FacturaSede, TendenciaPunto, PeriodoFilter, ResumenEjecutivoItem, DatosBasicosFactura, DescargaFacturaEstadoItem, ContratoSinFacturaCompletaItem, FacturaItem, TelemetriaMensualItem, TelemetriaHorariaItem, UaiExpertItem } from '../services/dashboard.service';
 import { forkJoin, of } from 'rxjs';
 
 interface PeriodoOption {
@@ -86,6 +87,44 @@ interface TelemetryGroup {
   cards: SensorCard[];
 }
 
+interface TemperatureAlarm {
+  key: string;            // sede+sensor+fecha (para no repetir)
+  sensorName: string;
+  headquarters: string;
+  currentValue: number;
+  baselineValue: number;
+  unit: string;
+  changePct: number;
+  reason: 'toma anterior' | 'última hora';
+  datetime: string;
+}
+
+interface UaiExpertSection {
+  title: string;
+  items: string[];
+  icon: string;
+}
+
+interface UaiExpertReport {
+  customerName: string;
+  headquartersId: string;
+  headquartersName: string;
+  status: string;
+  reportTitle: string;
+  intro: string;
+  sections: UaiExpertSection[];
+}
+
+/** Reporte del UAI Expert de Facturas (resumen ejecutivo de facturas, por sede). */
+interface ResumenEjecutivoReport {
+  customerName: string;
+  headquartersId: string;
+  headquartersName: string;
+  status: string;
+  reportTitle: string;
+  reportDescription: string;
+}
+
 interface InfraData {
   efficiency: string;
   status: string;
@@ -100,8 +139,8 @@ interface InfraData {
   standalone: true,
   imports: [IonContent, CommonModule, FormsModule]
 })
-export class HomePage implements OnInit {
-  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert' = 'resumen';
+export class HomePage implements OnInit, OnDestroy {
+  activeTab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert' | 'uaiMedicion' = 'resumen';
   infraItems: ResumenEjecutivoItem[] = [];
   showProfileDropdown = false;
   @ViewChild('profileDropdown') profileDropdown?: ElementRef;
@@ -358,6 +397,13 @@ export class HomePage implements OnInit {
   selectedFacturaSede = 'todas';
   availableFacturaSedes: string[] = [];
   showFacturaSedeDropdown = false;
+  /** Mapa nombre-de-sede → headquarters_id (desde contratos), para consultar por id. */
+  private facturaSedeIdByName = new Map<string, string>();
+
+  // --- UAI Expert (Facturas) — reporte_resumen_ejecutivo ---
+  facturasUaiReports: ResumenEjecutivoReport[] = [];
+  isLoadingFacturasUai = false;
+  facturasUaiError = '';
 
   // --- Contratos ---
   estadosContratos: any[] = [];
@@ -448,7 +494,9 @@ export class HomePage implements OnInit {
   telemetriaHorariaItemsCompare: TelemetriaHorariaItem[] = [];
   isLoadingTelemetria = false;
   telemetriaError = '';
-  availableSedes: string[] = [];
+  /** Sedes disponibles (Medición): se identifican por headquarters_id y se muestran por nombre. */
+  availableSedes: { id: string; name: string }[] = [];
+  /** headquarters_id de la sede seleccionada, o 'todas'. */
   selectedSede = 'todas';
   showSedeDropdown = false;
   selectedTelemetriaMonth: { year: number; month: number } = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
@@ -456,6 +504,28 @@ export class HomePage implements OnInit {
   /** Fecha a la que corresponden los datos horarios ya cargados (evita mostrar otro día) */
   telemetriaHorariaLoadedDate = '';
   telemetriaSensorGroups: TelemetryGroup[] = [];
+
+  // --- Alarmas de temperatura (Medición Inteligente) ---
+  /** Umbral de subida de temperatura que dispara alarma (%). */
+  private readonly TEMP_THRESHOLD_PCT = 10;
+  /** Cada cuánto se revisa la temperatura mientras la app está en Medición (ms). */
+  private readonly TEMP_MONITOR_INTERVAL_MS = 10 * 60 * 1000;
+  /** Alarmas de temperatura activas (para la campana). */
+  temperatureAlarms: TemperatureAlarm[] = [];
+  /** Claves ya notificadas al celular, para no repetir la misma alarma. */
+  private notifiedTempKeys = new Set<string>();
+  /** Handle del monitor periódico de temperatura. */
+  private tempMonitorHandle: any = null;
+
+  // --- UAI Expert (Medición Inteligente) ---
+  /** Reportes cargados (del cliente o de todos si hubo fallback). */
+  uaiAllReports: UaiExpertReport[] = [];
+  /** Reportes visibles según la sede seleccionada. */
+  uaiReports: UaiExpertReport[] = [];
+  isLoadingUaiExpert = false;
+  uaiError = '';
+  /** Indica si ya se trajeron TODOS los reportes (fallback), para no repetir la llamada. */
+  private uaiFetchedAll = false;
 
   // --- Mock Data para Historial ---
   historialFacturasMock = [
@@ -502,7 +572,8 @@ export class HomePage implements OnInit {
       // Críticas (vencidas) primero, luego las alertas
       return [...pagoAlarms, ...missingAlarms];
     } else if (this.currentContext === 'Medición Inteligente') {
-      return this.getTelemetryAnomalyAlarms();
+      // Temperatura (crítica) primero, luego anomalías de consumo.
+      return [...this.temperatureAlarmNotifications(), ...this.getTelemetryAnomalyAlarms()];
     } else {
       // Use enriched alarms if available, otherwise fall back to alarmasItems
       if (this.alarmasAbiertas.length > 0) {
@@ -534,6 +605,19 @@ export class HomePage implements OnInit {
         rawItem: a
       }));
     }
+  }
+
+  /** Mapea las alarmas de temperatura activas al formato de la campana. */
+  private temperatureAlarmNotifications(): { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] {
+    return this.temperatureAlarms.map(a => ({
+      title: `🌡️ Temperatura alta — ${a.sensorName}`,
+      subtitle: `Crítica • ${a.headquarters} • ${a.changePct > 0 ? '+' : ''}${a.changePct}% vs ${a.reason}`,
+      detail: `Actual: ${a.currentValue}${a.unit} vs ${a.baselineValue}${a.unit}. Subió más del ${this.TEMP_THRESHOLD_PCT}% respecto a la ${a.reason}.`,
+      type: 'temperature',
+      serial: a.sensorName,
+      date: DashboardService.getLocalDateString(),
+      rawItem: a
+    }));
   }
 
   getTelemetryAnomalyAlarms(): { title: string; subtitle: string; detail: string; type: string; serial?: string; date?: string; rawItem?: any }[] {
@@ -577,6 +661,15 @@ export class HomePage implements OnInit {
   }
 
   handleNotificationClick(notification: any) {
+    // Alarma de temperatura: llevar a la vista Horario de Medición.
+    if (notification.type === 'temperature') {
+      this.closeNotifications();
+      if (this.currentContext !== 'Medición Inteligente') {
+        this.selectContext('Medición Inteligente');
+      }
+      this.switchTab('horario');
+      return;
+    }
     if (notification.rawItem) {
       this.closeNotifications();
       this.activeTab = 'equipos';
@@ -654,39 +747,50 @@ export class HomePage implements OnInit {
     private router: Router,
     private authService: AuthService,
     private dashboardService: DashboardService,
-    private sanitizer: DomSanitizer
+    private sanitizer: DomSanitizer,
+    private notificationSvc: NotificationService
   ) {
 
   }
 
   ngOnInit() {
+    // Pide permiso de notificaciones y crea el canal de alta prioridad (Android).
+    this.notificationSvc.init();
+  }
+
+  ngOnDestroy() {
+    this.stopTemperatureMonitor();
+  }
+
+  /**
+   * Verifica si alguno de los roles del usuario coincide con los patrones dados.
+   * Normaliza acentos (p. ej. "Medición" → "medicion") y usa minúsculas.
+   * Los patrones deben ir SIN acentos.
+   */
+  private roleMatches(patterns: string[]): boolean {
+    const roles = this.authService.getUserRoles();
+    if (roles.length === 0) return true; // dev fallback
+    const norm = (s: string) => s.toLowerCase()
+      .replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i')
+      .replace(/ó/g, 'o').replace(/ú/g, 'u').replace(/ü/g, 'u').replace(/ñ/g, 'n');
+    return roles.some(r => {
+      const n = norm(r);
+      return patterns.some(p => n.includes(p));
+    });
   }
 
   hasFinanzasAccess(): boolean {
-    const roles = this.authService.getUserRoles();
-    if (roles.length === 0) return true; // dev fallback
-    return roles.some(r => {
-      const lower = r.toLowerCase();
-      return lower.includes('finanzas') || lower.includes('financiero');
-    });
+    // Rol actual: "Facturas" (antes "Finanzas" — se mantiene por compatibilidad).
+    return this.roleMatches(['facturas', 'finanzas', 'financiero']);
   }
 
   hasInfraAccess(): boolean {
-    const roles = this.authService.getUserRoles();
-    if (roles.length === 0) return true; // dev fallback
-    return roles.some(r => {
-      const lower = r.toLowerCase();
-      return lower.includes('infraestructura');
-    });
+    return this.roleMatches(['infraestructura']);
   }
 
   hasMedicionAccess(): boolean {
-    const roles = this.authService.getUserRoles();
-    if (roles.length === 0) return true; // dev fallback
-    return roles.some(r => {
-      const lower = r.toLowerCase();
-      return lower.includes('medicion') || lower.includes('telemetria') || lower.includes('administrar sedes') || lower.includes('administrar_sedes');
-    });
+    // Rol actual: "Medición Inteligente" (antes "Administrar Sedes" — compatibilidad).
+    return this.roleMatches(['medicion inteligente', 'medicion', 'telemetria', 'administrar sedes', 'administrar_sedes']);
   }
 
   ionViewWillEnter() {
@@ -714,6 +818,16 @@ export class HomePage implements OnInit {
     if (canInfra) {
       this.loadInfraData();
     }
+
+    // Monitoreo de temperatura activo mientras la app esté abierta (cualquier módulo),
+    // siempre que el usuario tenga acceso a Medición Inteligente.
+    if (this.hasMedicionAccess()) {
+      this.startTemperatureMonitor();
+    }
+  }
+
+  ionViewWillLeave() {
+    this.stopTemperatureMonitor();
   }
 
   private resetState() {
@@ -913,6 +1027,7 @@ export class HomePage implements OnInit {
     this.showCompanyDropdown = false;
     this.selectedTrendIndex = null;
     this.applyCompanyFilter();
+    if (this.activeTab === 'uaiExpert') this.loadFacturasUaiExpert();
   }
 
   getSelectedCompanyLabel(): string {
@@ -1011,14 +1126,19 @@ export class HomePage implements OnInit {
    */
   private extractFacturaSedes(contratos: any[]) {
     const set = new Set<string>();
+    const idByName = new Map<string, string>();
     (contratos || []).forEach(c => {
       const estado = (c.state || c.status || '').toString().trim().toLowerCase();
       const cancelado = estado === 'cancelado' || estado === 'inactivo'
         || estado === 'cancelled' || estado === 'inactive';
       if (!cancelado && c.headquarters_name) {
-        set.add(c.headquarters_name.trim());
+        const name = c.headquarters_name.trim();
+        set.add(name);
+        // Mapa nombre → headquarters_id (para consultar reporte_resumen_ejecutivo por id).
+        if (c.headquarters_id) idByName.set(name, c.headquarters_id);
       }
     });
+    this.facturaSedeIdByName = idByName;
     const arr = Array.from(set).filter(Boolean).sort();
     if (JSON.stringify(arr) !== JSON.stringify(this.availableFacturaSedes)) {
       this.availableFacturaSedes = arr;
@@ -1035,10 +1155,45 @@ export class HomePage implements OnInit {
     this.showFacturaSedeDropdown = false;
     this.selectedTrendIndex = null;
     this.applyCompanyFilter();
+    if (this.activeTab === 'uaiExpert') this.loadFacturasUaiExpert();
   }
 
   getSelectedFacturaSedeLabel(): string {
     return this.selectedFacturaSede === 'todas' ? 'Todas las Sedes' : this.selectedFacturaSede;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // UAI Expert (Facturas) — reporte_resumen_ejecutivo (customer_id + headquarters_id)
+  // ═══════════════════════════════════════════════════════════════
+
+  loadFacturasUaiExpert() {
+    this.isLoadingFacturasUai = true;
+    this.facturasUaiError = '';
+    const customerId = this.selectedCompanyId; // 'todos' → scope de sesión (en el servicio)
+    const sedeName = this.selectedFacturaSede;
+    const headquartersId = sedeName !== 'todas' ? this.facturaSedeIdByName.get(sedeName) : undefined;
+    this.dashboardService.getReporteResumenEjecutivo(customerId, headquartersId).subscribe({
+      next: (items: ResumenEjecutivoItem[]) => {
+        this.facturasUaiReports = (items || []).map(i => this.buildResumenReport(i));
+        this.isLoadingFacturasUai = false;
+        console.log(`🧠 UAI Facturas: ${this.facturasUaiReports.length} reporte(s); empresa='${customerId}' sede='${sedeName}'`);
+      },
+      error: () => {
+        this.isLoadingFacturasUai = false;
+        this.facturasUaiError = 'No se pudo cargar el análisis de UAI Expert.';
+      }
+    });
+  }
+
+  private buildResumenReport(i: ResumenEjecutivoItem): ResumenEjecutivoReport {
+    return {
+      customerName: i['customer_name'] || '',
+      headquartersId: i['headquarters_id'] || '',
+      headquartersName: i['headquarters_name'] || '',
+      status: (i['status'] || '').toString(),
+      reportTitle: i['report_title'] || 'Resumen ejecutivo',
+      reportDescription: i['report_description'] || '',
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1052,7 +1207,16 @@ export class HomePage implements OnInit {
   selectSede(sede: string) {
     this.selectedSede = sede;
     this.showSedeDropdown = false;
-    this.reagrupateTelemetry();
+    if (this.activeTab === 'uaiMedicion') {
+      // Filtra localmente si ya hay datos; si no, los carga.
+      if (this.uaiAllReports.length > 0) {
+        this.applyUaiSedeFilter();
+      } else {
+        this.loadUaiExpert();
+      }
+    } else {
+      this.reagrupateTelemetry();
+    }
   }
 
   toggleTelemetryGroup(group: TelemetryGroup) {
@@ -1324,7 +1488,287 @@ export class HomePage implements OnInit {
   }
 
   getSelectedSedeLabel(): string {
-    return this.selectedSede === 'todas' ? 'Todas las Sedes' : this.selectedSede;
+    if (this.selectedSede === 'todas') return 'Todas las Sedes';
+    const sede = this.availableSedes.find(s => s.id === this.selectedSede);
+    return sede ? sede.name : this.selectedSede;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Alarmas de Temperatura — Medición Inteligente
+  // ═══════════════════════════════════════════════════════════════
+
+  /** Inicia el monitoreo periódico de temperatura mientras la app esté en Medición. */
+  private startTemperatureMonitor() {
+    this.stopTemperatureMonitor();
+    this.pollTemperature(); // chequeo inmediato
+    this.tempMonitorHandle = setInterval(() => this.pollTemperature(), this.TEMP_MONITOR_INTERVAL_MS);
+  }
+
+  private stopTemperatureMonitor() {
+    if (this.tempMonitorHandle) {
+      clearInterval(this.tempMonitorHandle);
+      this.tempMonitorHandle = null;
+    }
+  }
+
+  /** Trae la telemetría horaria de hoy y revisa picos de temperatura. */
+  private pollTemperature() {
+    const today = DashboardService.getLocalDateString();
+    this.dashboardService.getReporteTelemetriaHoraria(today).subscribe({
+      next: (items) => this.checkTemperatureAlarms(items),
+      error: () => { /* silencioso: el monitor reintenta en el siguiente ciclo */ }
+    });
+  }
+
+  /**
+   * Revisa los sensores de temperatura: si el último valor sube más del umbral (10%)
+   * respecto a la toma anterior O respecto a la última hora, genera la alarma y notifica
+   * al celular (notificación local de alta prioridad). Solo notifica alarmas nuevas.
+   */
+  private checkTemperatureAlarms(items: TelemetriaHorariaItem[]) {
+    const spikes = this.detectTemperatureSpikes(items);
+    this.temperatureAlarms = spikes; // alimenta la campana
+
+    for (const a of spikes) {
+      if (this.notifiedTempKeys.has(a.key)) continue;
+      this.notifiedTempKeys.add(a.key);
+      const arrow = a.changePct > 0 ? '▲' : '';
+      const title = `🌡️ Temperatura alta — ${a.sensorName}`;
+      const body = `${a.headquarters}: ${arrow}${a.changePct}% (${a.baselineValue}${a.unit} → ${a.currentValue}${a.unit}) vs ${a.reason}.`;
+      this.notificationSvc.fireTemperatureAlarm(this.tempNotifId(a.key), title, body);
+    }
+  }
+
+  /** id numérico estable (32-bit) derivado de la clave de la alarma. */
+  private tempNotifId(key: string): number {
+    let h = 0;
+    for (let i = 0; i < key.length; i++) { h = (h * 31 + key.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+  }
+
+  /** Detección pura de picos de temperatura (> umbral vs toma anterior o última hora). */
+  private detectTemperatureSpikes(items: TelemetriaHorariaItem[]): TemperatureAlarm[] {
+    const isTemp = (it: TelemetriaHorariaItem) => {
+      const v = (it.variable || '').toLowerCase();
+      const s = (it.sensor_name || '').toLowerCase();
+      const u = (it.unit || '').toLowerCase();
+      return v.includes('temp') || s.includes('temp') || u.includes('°c') || u === 'c';
+    };
+
+    const groups = new Map<string, TelemetriaHorariaItem[]>();
+    for (const it of items) {
+      if (!isTemp(it) || it.value === null || it.value === undefined) continue;
+      const key = `${it.headquarters_id}|${it.sensor_name}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(it);
+    }
+
+    const alarms: TemperatureAlarm[] = [];
+    const parseTime = (d: string) => new Date(d.includes('Z') || d.includes('+') ? d : d + 'Z').getTime();
+
+    groups.forEach(arr => {
+      arr.sort((a, b) => a.datetime_record.localeCompare(b.datetime_record));
+      if (arr.length < 2) return;
+      const latest = arr[arr.length - 1];
+      const prev = arr[arr.length - 2];
+
+      let reason: 'toma anterior' | 'última hora' | null = null;
+      let baseline = 0;
+
+      // 1) vs toma anterior
+      if (prev.value > 0 && ((latest.value - prev.value) / prev.value) * 100 > this.TEMP_THRESHOLD_PCT) {
+        reason = 'toma anterior';
+        baseline = prev.value;
+      } else {
+        // 2) vs última hora: valor mínimo en la hora previa al último registro
+        const latestT = parseTime(latest.datetime_record);
+        const hourAgo = latestT - 3600_000;
+        const lastHour = arr.filter(it => {
+          const t = parseTime(it.datetime_record);
+          return t >= hourAgo && t < latestT;
+        });
+        if (lastHour.length) {
+          const minInHour = Math.min(...lastHour.map(it => it.value));
+          if (minInHour > 0 && ((latest.value - minInHour) / minInHour) * 100 > this.TEMP_THRESHOLD_PCT) {
+            reason = 'última hora';
+            baseline = minInHour;
+          }
+        }
+      }
+
+      if (reason) {
+        alarms.push({
+          key: `${latest.headquarters_id}|${latest.sensor_name}|${latest.datetime_record}`,
+          sensorName: latest.sensor_name,
+          headquarters: latest.headquarters_name,
+          currentValue: Math.round(latest.value * 10) / 10,
+          baselineValue: Math.round(baseline * 10) / 10,
+          unit: latest.unit || '°C',
+          changePct: Math.round(((latest.value - baseline) / baseline) * 1000) / 10,
+          reason,
+          datetime: latest.datetime_record,
+        });
+      }
+    });
+
+    return alarms;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // UAI Expert — Análisis IA por sede (reporte_uai_expert)
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Carga los reportes UAI Expert del cliente (misma resolución de cliente que la telemetría)
+   * y filtra por sede usando headquarters_id. Si el cliente de sesión no trae el reporte de la
+   * sede seleccionada, hace fallback a todos los reportes y filtra por id (UUID único).
+   */
+  loadUaiExpert() {
+    this.isLoadingUaiExpert = true;
+    this.uaiError = '';
+    this.uaiFetchedAll = false;
+    // 1) Intento con el cliente de la sesión (misma resolución que la telemetría → aislamiento).
+    this.dashboardService.getReporteUaiExpert().subscribe({
+      next: (items: UaiExpertItem[]) => {
+        if (items.length > 0) {
+          this.applyUaiReports(items);
+        } else {
+          // Sin reportes para el cliente de sesión → traer todos (se filtra por id de sede).
+          this.fetchAllUaiReports();
+        }
+      },
+      error: () => this.failUaiExpert()
+    });
+  }
+
+  /** Trae TODOS los reportes UAI (fallback). El filtro por headquarters_id (UUID) evita fugas. */
+  private fetchAllUaiReports() {
+    this.uaiFetchedAll = true;
+    this.isLoadingUaiExpert = true;
+    console.warn('🤖 UAI Expert: usando fallback (todos los reportes → filtro por headquarters_id).');
+    this.dashboardService.getReporteUaiExpert(true).subscribe({
+      next: (all: UaiExpertItem[]) => this.applyUaiReports(all),
+      error: () => this.failUaiExpert()
+    });
+  }
+
+  private applyUaiReports(items: UaiExpertItem[]) {
+    this.uaiAllReports = items.map(i => this.buildUaiReport(i));
+    this.isLoadingUaiExpert = false;
+    // Poblar sedes disponibles desde el reporte si aún no se cargó telemetría.
+    if (this.availableSedes.length === 0) {
+      this.availableSedes = this.buildSedesList(items);
+    }
+    this.applyUaiSedeFilter();
+    console.log(`🤖 UAI Expert: ${this.uaiAllReports.length} reporte(s); sede='${this.selectedSede}' → visibles: ${this.uaiReports.length}`);
+  }
+
+  private failUaiExpert() {
+    this.isLoadingUaiExpert = false;
+    this.uaiError = 'No se pudo cargar el análisis de UAI Expert.';
+  }
+
+  /** Filtra los reportes por la sede seleccionada (por headquarters_id). */
+  private applyUaiSedeFilter() {
+    if (this.selectedSede === 'todas') {
+      // "Todas": limita a las sedes del cliente (según availableSedes de telemetría) si las hay.
+      const sedeIds = new Set(this.availableSedes.map(s => s.id));
+      this.uaiReports = sedeIds.size > 0
+        ? this.uaiAllReports.filter(r => sedeIds.has(r.headquartersId))
+        : [...this.uaiAllReports];
+      return;
+    }
+    this.uaiReports = this.uaiAllReports.filter(r => r.headquartersId === this.selectedSede);
+    // Si la sede seleccionada no está entre los reportes cargados y aún no hemos traído
+    // todos, hacemos el fallback (el id de sede es único, así que no hay fuga de datos).
+    if (this.uaiReports.length === 0 && !this.uaiFetchedAll) {
+      this.fetchAllUaiReports();
+    }
+  }
+
+  /** Transforma un item crudo del reporte en un modelo de vista con secciones parseadas. */
+  private buildUaiReport(item: UaiExpertItem): UaiExpertReport {
+    const { intro, sections } = this.parseUaiDescription(item.report_description || '');
+    return {
+      customerName: item.customer_name,
+      headquartersId: item.headquarters_id,
+      headquartersName: item.headquarters_name,
+      status: item.status || '',
+      reportTitle: item.report_title || 'Análisis UAI Expert',
+      intro,
+      sections
+    };
+  }
+
+  /**
+   * Parsea el texto del reporte (formato markdown ligero):
+   *  - Encabezados de sección en negrita: "**Título:**" (con posible número previo).
+   *  - Viñetas ("* ", "- ", "• ") y numerales ("1. ") como ítems de la sección.
+   *  - Párrafos como ítems sueltos.
+   * Limpia los marcadores markdown (**) para que no aparezcan literales.
+   */
+  private parseUaiDescription(desc: string): { intro: string; sections: UaiExpertSection[] } {
+    const stripMd = (s: string) => s.replace(/\*\*/g, '').replace(/`/g, '').trim();
+    const rawLines = (desc || '').split('\n');
+
+    let intro = '';
+    const sections: UaiExpertSection[] = [];
+    let current: UaiExpertSection | null = null;
+    const flush = () => { if (current) { sections.push(current); current = null; } };
+
+    for (const raw of rawLines) {
+      const line = raw.trim();
+      if (!line) continue;
+
+      // ¿Es un encabezado? Línea que es SOLO un título en negrita, con posible
+      // número inicial ("2. **Título:**") y dos puntos finales opcionales.
+      const header = line.match(/^(?:\d+[.)]\s*)?\*\*(.+?)\*\*\s*:?\s*$/);
+      if (header) {
+        flush();
+        const title = stripMd(header[1]).replace(/:\s*$/, '');
+        current = { title, items: [], icon: this.getUaiSectionIcon(title) };
+        continue;
+      }
+
+      // Contenido: quitar viñeta/numeración inicial y limpiar markdown.
+      const text = stripMd(line.replace(/^[-•*]\s+/, '').replace(/^\d+[.)]\s+/, ''));
+      if (!text) continue;
+
+      if (current) {
+        current.items.push(text);
+      } else {
+        // Antes de cualquier encabezado: acumula como introducción.
+        intro = intro ? `${intro} ${text}` : text;
+      }
+    }
+    flush();
+    return { intro, sections };
+  }
+
+  /** Ícono para cada sección del reporte según su título. */
+  private getUaiSectionIcon(title: string): string {
+    const t = (title || '').toLowerCase();
+    if (t.includes('anomal') || t.includes('alarma')) return 'warning';
+    if (t.includes('sensor') || t.includes('iot') || t.includes('red')) return 'sensors';
+    if (t.includes('consum') || t.includes('tendenc') || t.includes('energ') || t.includes('correlac')) return 'insights';
+    if (t.includes('recomend') || t.includes('acci')) return 'lightbulb';
+    return 'analytics';
+  }
+
+  /** Clase de color del badge según el estado del reporte. */
+  getUaiStatusClass(status: string): string {
+    const s = (status || '').toLowerCase();
+    if (s.includes('crít') || s.includes('crit')) return 'bg-[#EF4444]/15 text-[#EF4444] border-[#EF4444]/30';
+    if (s.includes('atenc') || s.includes('alerta') || s.includes('advert')) return 'bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/30';
+    return 'bg-[#29E490]/15 text-[#29E490] border-[#29E490]/30';
+  }
+
+  /** Ícono del badge de estado. */
+  getUaiStatusIcon(status: string): string {
+    const s = (status || '').toLowerCase();
+    if (s.includes('crít') || s.includes('crit')) return 'error';
+    if (s.includes('atenc') || s.includes('alerta') || s.includes('advert')) return 'warning';
+    return 'check_circle';
   }
 
   /** Encuentra el año/mes más reciente con datos, para seleccionarlo por defecto en la vista mensual */
@@ -1539,23 +1983,30 @@ export class HomePage implements OnInit {
   }
 
   extractSedes(items: TelemetriaMensualItem[]) {
-    const sedesSet = new Set(items.map(i => i.headquarters_name).filter(s => !!s));
-    this.availableSedes = Array.from(sedesSet).sort();
+    this.availableSedes = this.buildSedesList(items);
   }
 
   extractSedesHoraria(items: TelemetriaHorariaItem[]) {
-    const sedesSet = new Set(items.map(i => i.headquarters_name).filter(s => !!s));
-    this.availableSedes = Array.from(sedesSet).sort();
+    this.availableSedes = this.buildSedesList(items);
+  }
+
+  /** Construye la lista única de sedes (por headquarters_id) ordenada por nombre. */
+  private buildSedesList(items: { headquarters_id: string; headquarters_name: string }[]): { id: string; name: string }[] {
+    const map = new Map<string, string>();
+    items.forEach(i => { if (i.headquarters_id) map.set(i.headquarters_id, i.headquarters_name || i.headquarters_id); });
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   filterBySede(items: TelemetriaMensualItem[]): TelemetriaMensualItem[] {
     if (this.selectedSede === 'todas') return items;
-    return items.filter(i => i.headquarters_name === this.selectedSede);
+    return items.filter(i => i.headquarters_id === this.selectedSede);
   }
 
   filterBySedeHoraria(items: TelemetriaHorariaItem[]): TelemetriaHorariaItem[] {
     if (this.selectedSede === 'todas') return items;
-    return items.filter(i => i.headquarters_name === this.selectedSede);
+    return items.filter(i => i.headquarters_id === this.selectedSede);
   }
 
   private getVariableIcon(variable: string): string {
@@ -2131,7 +2582,7 @@ export class HomePage implements OnInit {
     this.showNotificationsPanel = false;
   }
 
-  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert') {
+  switchTab(tab: 'resumen' | 'historial' | 'equipos' | 'reportes' | 'detalle' | 'alarmas' | 'mensual' | 'diario' | 'horario' | 'uaiExpert' | 'uaiMedicion') {
     this.activeTab = tab;
     this.showPeriodDropdown = false;
     // "Año Anterior" solo existe en Resumen; al salir a otra vista de facturas se vuelve a "Año Actual".
@@ -2158,6 +2609,12 @@ export class HomePage implements OnInit {
     }
     if (tab === 'horario') {
       this.loadTelemetriaHoraria();
+    }
+    if (tab === 'uaiMedicion') {
+      this.loadUaiExpert();
+    }
+    if (tab === 'uaiExpert') {
+      this.loadFacturasUaiExpert();
     }
   }
 

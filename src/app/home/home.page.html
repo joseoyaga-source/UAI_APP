@@ -176,8 +176,8 @@
 
       <!-- Fila 2: Empresa + Sede -->
       <div class="flex flex-wrap items-center gap-2">
-      <!-- Selector de Empresa -->
-      <div *ngIf="availableCompanies.length > 0" class="company-selector-container relative">
+      <!-- Selector de Empresa (oculto si el rol solo da acceso a un cliente) -->
+      <div *ngIf="availableCompanies.length > 1" class="company-selector-container relative">
         <div class="relative flex items-center gap-2 bg-[#014751]/80 backdrop-blur-md w-max rounded-full px-4 py-2 border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
           <span class="material-symbols-outlined text-[16px] text-[#29E490]">corporate_fare</span>
           <button (click)="toggleCompanyDropdown()" class="text-[11px] font-bold text-[#FDFEF0] flex items-center gap-1.5 uppercase tracking-wider">
@@ -245,10 +245,10 @@
                 [class.text-[#29E490]]="selectedSede === 'todas'">
           <span class="material-symbols-outlined text-base">all_inclusive</span> Todas las Sedes
         </button>
-        <button *ngFor="let s of availableSedes" (click)="selectSede(s)"
+        <button *ngFor="let s of availableSedes" (click)="selectSede(s.id)"
                 class="w-full text-left px-4 py-3 text-xs font-semibold hover:bg-white/5 transition-colors flex items-center gap-3 text-[#FDFEF0]"
-                [class.text-[#29E490]]="selectedSede === s">
-          <span class="material-symbols-outlined text-base">domain</span> {{ s }}
+                [class.text-[#29E490]]="selectedSede === s.id">
+          <span class="material-symbols-outlined text-base">domain</span> {{ s.name }}
         </button>
       </div>
     </div>
@@ -1157,74 +1157,71 @@
       </div>
     </ng-container>
 
-    <!-- Pestaña: UAI Expert (Facturas) — Resumen gerencial con IA (en construcción) -->
+    <!-- Pestaña: UAI Expert (Facturas) — Resumen ejecutivo con IA (reporte_resumen_ejecutivo) -->
     <ng-container *ngIf="currentContext === 'Gestión de Facturas' && activeTab === 'uaiExpert'">
       <div class="space-y-4 animate-fade-in pb-10">
 
         <!-- Hero -->
-        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/15 p-6 text-center" style="background: linear-gradient(160deg,#014751 0%,#013440 55%,#022022 100%)">
+        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/15 p-5" style="background: linear-gradient(160deg,#014751 0%,#013440 55%,#022022 100%)">
           <div class="absolute -top-10 -right-8 w-40 h-40 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.16),transparent 70%)"></div>
-          <div class="absolute -bottom-12 -left-10 w-40 h-40 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.10),transparent 70%)"></div>
-
-          <div class="relative z-10 flex flex-col items-center gap-3">
-            <div class="w-16 h-16 rounded-2xl bg-[#29E490]/15 border border-[#29E490]/25 flex items-center justify-center">
-              <span class="material-symbols-outlined text-[#29E490] text-[34px] uai-pulse">auto_awesome</span>
+          <div class="relative z-10 flex items-center gap-4">
+            <div class="w-14 h-14 rounded-2xl bg-[#29E490]/15 border border-[#29E490]/25 flex items-center justify-center flex-shrink-0">
+              <span class="material-symbols-outlined text-[#29E490] text-[30px] uai-pulse">auto_awesome</span>
             </div>
             <div>
-              <h2 class="text-[#FDFEF0] text-xl font-black tracking-tight">UAI Expert</h2>
-              <p class="text-[#91A2B8] text-[11px] uppercase tracking-widest font-bold mt-1">Resumen gerencial con IA</p>
+              <h2 class="text-[#FDFEF0] text-lg font-black tracking-tight">UAI Expert</h2>
+              <p class="text-[#91A2B8] text-[11px] uppercase tracking-widest font-bold mt-0.5">Resumen ejecutivo con IA</p>
             </div>
-            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F59E0B]/15 border border-[#F59E0B]/30 text-[#F59E0B] text-[10px] font-bold uppercase tracking-wider">
-              <span class="material-symbols-outlined text-[13px]">construction</span> En construcción
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div *ngIf="isLoadingFacturasUai" class="flex flex-col items-center justify-center py-16 gap-3">
+          <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
+          <p class="text-[#91A2B8] text-xs">Generando análisis…</p>
+        </div>
+
+        <!-- Error -->
+        <div *ngIf="!isLoadingFacturasUai && facturasUaiError" class="text-center py-8 text-red-400 text-xs">{{ facturasUaiError }}</div>
+
+        <!-- Vacío -->
+        <div *ngIf="!isLoadingFacturasUai && !facturasUaiError && facturasUaiReports.length === 0" class="flex flex-col items-center justify-center py-16 gap-2">
+          <span class="material-symbols-outlined text-[#91A2B8] text-4xl">psychology_alt</span>
+          <p class="text-[#91A2B8] text-xs">Sin análisis disponible para esta selección.</p>
+        </div>
+
+        <!-- Reportes por sede -->
+        <div *ngFor="let r of facturasUaiReports" class="rounded-[24px] border border-white/5 overflow-hidden" style="background:#014751">
+          <!-- Header: sede + estado -->
+          <div class="px-5 pt-4 pb-3 border-b border-white/5 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[#29E490] text-[18px]">location_on</span>
+                <h3 class="text-[#FDFEF0] text-sm font-black tracking-tight truncate">{{ r.headquartersName }}</h3>
+              </div>
+              <p class="text-[10px] text-[#91A2B8] mt-0.5 pl-6">{{ r.customerName }}</p>
+            </div>
+            <span *ngIf="r.status" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider border flex-shrink-0" [ngClass]="getUaiStatusClass(r.status)">
+              <span class="material-symbols-outlined text-[13px]">{{ getUaiStatusIcon(r.status) }}</span>
+              {{ r.status }}
             </span>
           </div>
-        </div>
 
-        <!-- Mensaje al usuario -->
-        <div class="rounded-2xl bg-[#014751]/50 border border-white/5 px-5 py-4 text-center">
-          <p class="text-[#FDFEF0] text-sm font-semibold leading-relaxed">Estamos trabajando en esta funcionalidad 🚧</p>
-          <p class="text-[#91A2B8] text-xs mt-2 leading-relaxed">
-            Muy pronto UAI Expert analizará <span class="text-[#29E490] font-semibold">todo el historial de facturas</span> y sus variables para entregarte un resumen gerencial claro y accionable.
-          </p>
-        </div>
+          <!-- Título + descripción -->
+          <div class="px-5 py-4">
+            <div class="flex items-start gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                <span class="material-symbols-outlined text-[18px]">description</span>
+              </div>
+              <h4 class="text-[#FDFEF0] text-sm font-bold leading-snug">{{ r.reportTitle }}</h4>
+            </div>
+            <p class="text-[11px] text-[#C7D2DE] leading-relaxed mt-3">{{ r.reportDescription }}</p>
+          </div>
 
-        <!-- Preview de alcances -->
-        <div>
-          <p class="text-[#91A2B8] text-[10px] uppercase tracking-widest font-bold mb-2 pl-1">Qué podrás consultar</p>
-          <div class="space-y-2">
-            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
-              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
-                <span class="material-symbols-outlined text-lg">corporate_fare</span>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-[#FDFEF0] text-xs font-bold">Por empresa</p>
-                <p class="text-[10px] text-[#91A2B8]">Resumen ejecutivo del comportamiento de cada empresa.</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
-              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
-                <span class="material-symbols-outlined text-lg">location_on</span>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-[#FDFEF0] text-xs font-bold">Por sucursal</p>
-                <p class="text-[10px] text-[#91A2B8]">Detalle del consumo y costos por cada sede.</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-3 rounded-2xl bg-[#014751]/40 border border-white/5 px-4 py-3">
-              <div class="w-9 h-9 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
-                <span class="material-symbols-outlined text-lg">insights</span>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-[#FDFEF0] text-xs font-bold">General</p>
-                <p class="text-[10px] text-[#91A2B8]">Visión consolidada de todas tus empresas y sucursales.</p>
-              </div>
-            </div>
+          <div class="px-5 pb-4">
+            <p class="text-center text-[9px] text-[#91A2B8]/60 uppercase tracking-widest font-semibold">Generado por Inteligencia Artificial · UAI</p>
           </div>
         </div>
-
-        <p class="text-center text-[9px] text-[#91A2B8]/70 uppercase tracking-widest font-semibold pt-1">
-          Potenciado por Inteligencia Artificial
-        </p>
       </div>
     </ng-container>
 
@@ -1538,6 +1535,94 @@
       </div>
     </ng-container>
 
+    <!-- Pestaña: UAI Expert (Medición Inteligente) — Análisis IA por sede (reporte_uai_expert) -->
+    <ng-container *ngIf="currentContext === 'Medición Inteligente' && activeTab === 'uaiMedicion'">
+      <div class="space-y-4 animate-fade-in pb-10">
+
+        <!-- Hero -->
+        <div class="relative rounded-[24px] overflow-hidden border border-[#29E490]/15 p-5" style="background: linear-gradient(160deg,#014751 0%,#013440 55%,#022022 100%)">
+          <div class="absolute -top-10 -right-8 w-40 h-40 rounded-full pointer-events-none" style="background:radial-gradient(circle,rgba(41,228,144,0.16),transparent 70%)"></div>
+          <div class="relative z-10 flex items-center gap-4">
+            <div class="w-14 h-14 rounded-2xl bg-[#29E490]/15 border border-[#29E490]/25 flex items-center justify-center flex-shrink-0">
+              <span class="material-symbols-outlined text-[#29E490] text-[30px] uai-pulse">auto_awesome</span>
+            </div>
+            <div>
+              <h2 class="text-[#FDFEF0] text-lg font-black tracking-tight">UAI Expert</h2>
+              <p class="text-[#91A2B8] text-[11px] uppercase tracking-widest font-bold mt-0.5">Análisis inteligente por sede</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading -->
+        <div *ngIf="isLoadingUaiExpert" class="flex flex-col items-center justify-center py-16 gap-3">
+          <span class="material-symbols-outlined text-[#29E490] text-4xl animate-spin">autorenew</span>
+          <p class="text-[#91A2B8] text-xs">Generando análisis…</p>
+        </div>
+
+        <!-- Error -->
+        <div *ngIf="!isLoadingUaiExpert && uaiError" class="text-center py-8 text-red-400 text-xs">{{ uaiError }}</div>
+
+        <!-- Vacío -->
+        <div *ngIf="!isLoadingUaiExpert && !uaiError && uaiReports.length === 0" class="flex flex-col items-center justify-center py-16 gap-2">
+          <span class="material-symbols-outlined text-[#91A2B8] text-4xl">psychology_alt</span>
+          <p class="text-[#91A2B8] text-xs">Sin análisis disponible para esta sede.</p>
+        </div>
+
+        <!-- Reportes por sede -->
+        <div *ngFor="let r of uaiReports" class="rounded-[24px] border border-white/5 overflow-hidden" style="background:#014751">
+          <!-- Header: sede + estado -->
+          <div class="px-5 pt-4 pb-3 border-b border-white/5 flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[#29E490] text-[18px]">location_on</span>
+                <h3 class="text-[#FDFEF0] text-sm font-black tracking-tight truncate">{{ r.headquartersName }}</h3>
+              </div>
+              <p class="text-[10px] text-[#91A2B8] mt-0.5 pl-6">{{ r.customerName }}</p>
+            </div>
+            <span *ngIf="r.status" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider border flex-shrink-0" [ngClass]="getUaiStatusClass(r.status)">
+              <span class="material-symbols-outlined text-[13px]">{{ getUaiStatusIcon(r.status) }}</span>
+              {{ r.status }}
+            </span>
+          </div>
+
+          <!-- Título del reporte + intro -->
+          <div class="px-5 pt-4">
+            <div class="flex items-start gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                <span class="material-symbols-outlined text-[18px]">description</span>
+              </div>
+              <h4 class="text-[#FDFEF0] text-sm font-bold leading-snug">{{ r.reportTitle }}</h4>
+            </div>
+            <p *ngIf="r.intro" class="text-[11px] text-[#91A2B8] leading-relaxed mt-3">{{ r.intro }}</p>
+          </div>
+
+          <!-- Secciones -->
+          <div class="px-5 py-4 space-y-3">
+            <div *ngFor="let s of r.sections; let i = index" class="rounded-2xl bg-[#022022]/40 border border-white/5 p-4">
+              <div *ngIf="s.title" class="flex items-center gap-2.5 mb-2.5">
+                <div class="w-7 h-7 rounded-lg bg-[#29E490]/10 flex items-center justify-center text-[#29E490] flex-shrink-0">
+                  <span class="material-symbols-outlined text-[16px]">{{ s.icon }}</span>
+                </div>
+                <span class="text-[9px] font-black text-[#29E490] bg-[#29E490]/10 rounded-full px-2 py-0.5 flex-shrink-0">{{ i + 1 }}</span>
+                <h5 class="text-[12px] font-bold text-[#FDFEF0] tracking-tight flex-1 min-w-0">{{ s.title }}</h5>
+              </div>
+              <ul class="space-y-2">
+                <li *ngFor="let item of s.items" class="flex gap-2 text-[11px] text-[#C7D2DE] leading-relaxed">
+                  <span class="material-symbols-outlined text-[#29E490]/70 text-[14px] flex-shrink-0 mt-0.5">chevron_right</span>
+                  <span>{{ item }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="px-5 pb-4">
+            <p class="text-center text-[9px] text-[#91A2B8]/60 uppercase tracking-widest font-semibold">Generado por Inteligencia Artificial · UAI</p>
+          </div>
+        </div>
+      </div>
+    </ng-container>
+
   </main>
 
 
@@ -1605,6 +1690,13 @@
                 [ngClass]="activeTab === 'diario' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
           <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'diario'">today</span>
           <span>Diario</span>
+        </button>
+
+        <button *ngIf="currentContext === 'Medición Inteligente'" aria-label="UAI Expert" (click)="switchTab('uaiMedicion')"
+                class="flex-1 flex flex-col items-center justify-center text-[10px] font-bold transition-all duration-300 h-full rounded-full"
+                [ngClass]="activeTab === 'uaiMedicion' ? 'bg-[#29E490]/20 text-[#29E490] shadow-inner' : 'text-[#91A2B8]'">
+          <span class="material-symbols-outlined text-xl mb-0.5" [class.filled]="activeTab === 'uaiMedicion'">auto_awesome</span>
+          <span>UAI Expert</span>
         </button>
     </nav>
 </ion-content>

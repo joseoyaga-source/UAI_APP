@@ -133,6 +133,7 @@ export interface TelemetriaMensualItem {
   date_record: string;
   customer_id: string;
   customer_name: string;
+  headquarters_id: string;
   headquarters_name: string;
   sensor_name: string;
   unit: string;
@@ -144,11 +145,23 @@ export interface TelemetriaHorariaItem {
   datetime_record: string;
   customer_id: string;
   customer_name: string;
+  headquarters_id: string;
   headquarters_name: string;
   sensor_name: string;
   unit: string;
   variable: string;
   value: number;
+}
+
+// --- Interfaz para el reporte UAI Expert (análisis IA por sede) ---
+export interface UaiExpertItem {
+  id: string;                 // customer_id (NIT)
+  customer_name: string;
+  headquarters_id: string;
+  headquarters_name: string;
+  status: string;             // e.g. 'atención', 'óptimo', 'crítico'
+  report_title: string;
+  report_description: string; // texto con secciones numeradas y viñetas ("\n")
 }
 
 @Injectable({
@@ -170,7 +183,11 @@ export class DashboardService {
     reporte_telemetria_actual: 'monitoreo_equipos',
     reporte_telemetria_mensual: 'monitoreo_sedes',
     reporte_telemetria_diaria: 'monitoreo_sedes',
-    reporte_telemetria_horaria: 'monitoreo_sedes'
+    reporte_telemetria_horaria: 'monitoreo_sedes',
+    reporte_uai_expert: 'monitoreo_sedes',
+    // UAI Expert de Facturas: resumen ejecutivo de FACTURAS (esquema etl), distinto
+    // del resumen ejecutivo de EQUIPOS (monitoreo_equipos) usado en Infraestructura.
+    reporte_resumen_ejecutivo_facturas: 'etl_facturas_servicios_publicos'
   };
 
   private getHeaders(endpoint: string = 'reporte_historico_consumos'): HttpHeaders {
@@ -182,14 +199,17 @@ export class DashboardService {
   }
 
   /**
-   * Helper to parse and build the customer_id filter query based on the company claim
+   * Helper to parse and build the customer filter query based on the company claim.
+   * @param moduleType define el fallback de desarrollo.
+   * @param column nombre de la columna de cliente en la vista (por defecto 'customer_id';
+   *               algunas vistas como reporte_uai_expert la exponen como 'id').
    */
-  private getCustomerFilter(moduleType?: 'facturas' | 'infra'): string {
+  private getCustomerFilter(moduleType?: 'facturas' | 'infra', column: string = 'customer_id'): string {
     const company = this.authService.getCompany();
     if (!company) {
       // Fallback for development if no session/company is present
       const fallbackId = moduleType === 'infra' ? '900471387' : '800122811';
-      return `customer_id=eq.${fallbackId}`;
+      return `${column}=eq.${fallbackId}`;
     }
 
     if (company === '*') {
@@ -198,10 +218,10 @@ export class DashboardService {
 
     if (company.includes('|')) {
       const nits = company.split('|').map(n => n.trim()).filter(n => n).join(',');
-      return `customer_id=in.(${nits})`;
+      return `${column}=in.(${nits})`;
     }
 
-    return `customer_id=eq.${company.trim()}`;
+    return `${column}=eq.${company.trim()}`;
   }
 
   private fechaInicio(periodo: PeriodoFilter): string {
@@ -342,6 +362,34 @@ export class DashboardService {
     return this.http.get<ResumenEjecutivoItem[]>(url, { headers: this.getHeaders('reporte_resumen_ejecutivo') }).pipe(
       catchError(err => {
         console.error('Error en reporte_resumen_ejecutivo:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /**
+   * Resumen ejecutivo para el UAI Expert de Facturas.
+   * Llaves de la vista: customer_id y headquarters_id.
+   * @param customerId  empresa seleccionada (si es 'todos'/vacío se usa el scope de la sesión).
+   * @param headquartersId  sede seleccionada (si es 'todas'/vacío no se filtra por sede).
+   */
+  getReporteResumenEjecutivo(customerId?: string, headquartersId?: string): Observable<ResumenEjecutivoItem[]> {
+    const params: string[] = [];
+    if (customerId && customerId !== 'todos') {
+      params.push(`customer_id=eq.${customerId}`);
+    } else {
+      const f = this.getCustomerFilter('facturas');
+      if (f) params.push(f);
+    }
+    if (headquartersId && headquartersId !== 'todas') {
+      params.push(`headquarters_id=eq.${headquartersId}`);
+    }
+    const query = params.join('&');
+    const url = `${this.apiBase}/reporte_resumen_ejecutivo` + (query ? `?${query}` : '');
+    console.log('🧠 UAI Facturas GET:', url);
+    return this.http.get<ResumenEjecutivoItem[]>(url, { headers: this.getHeaders('reporte_resumen_ejecutivo_facturas') }).pipe(
+      catchError(err => {
+        console.error('Error en reporte_resumen_ejecutivo (facturas):', err);
         return of([]);
       })
     );
@@ -688,6 +736,35 @@ export class DashboardService {
     }).pipe(
       catchError(err => {
         console.error('Error en reporte_telemetria_horaria:', err);
+        return of([]);
+      })
+    );
+  }
+
+  /**
+   * Reporte UAI Expert: análisis IA del comportamiento energético por sede.
+   * Filtra por cliente (columna `id`) y, opcionalmente, por sede (`headquarters_name`).
+   * La vista vive en el esquema público, por lo que no requiere Accept-Profile.
+   */
+  getReporteUaiExpert(allCustomers = false): Observable<UaiExpertItem[]> {
+    const params: string[] = [];
+
+    // Filtro por cliente (columna 'id' en esta vista), usando la MISMA resolución que la
+    // telemetría de Medición ('infra') para que las sedes coincidan. Se omite si allCustomers.
+    // La sede se filtra en el cliente por headquarters_id (ver applyUaiSedeFilter).
+    if (!allCustomers) {
+      const filter = this.getCustomerFilter('infra', 'id');
+      if (filter) params.push(filter);
+    }
+
+    const query = params.join('&');
+    const url = `${this.apiBase}/reporte_uai_expert` + (query ? `?${query}` : '');
+    console.log('🤖 UAI Expert GET:', url);
+    return this.http.get<UaiExpertItem[]>(url, {
+      headers: this.getHeaders('reporte_uai_expert')
+    }).pipe(
+      catchError(err => {
+        console.error('Error en reporte_uai_expert:', err);
         return of([]);
       })
     );
